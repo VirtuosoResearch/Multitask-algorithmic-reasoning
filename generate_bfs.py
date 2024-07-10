@@ -41,6 +41,7 @@ def bfs(edges, n):
     
     return bfs_order, steps
 
+#
 def main(args):
     data_size = args.data_size
     nodes = args.nodes
