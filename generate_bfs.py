@@ -57,6 +57,7 @@ def main(args):
         bfs_order, steps = bfs(edges, n)
 
         instance = {
+            "n": nodes,
             "input": " ".join([f"{parent}-{child}" for parent, child in edges]),
             "output": " ".join(map(str, bfs_order))
         }
