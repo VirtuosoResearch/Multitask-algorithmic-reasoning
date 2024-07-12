@@ -68,6 +68,10 @@ def load_algorithmic_dataset_with_intermediate_steps(algorithm, data_dir, train_
     # instance_df = pd.read_csv(file_name)
     # print(instance_df.head()) 
     
+    print("*******train_size:",train_size)
+    print("*******valid_size",valid_size)
+    print("*******test_size",test_size)
+    
     instance_df = pd.read_csv(file_name, index_col=0)
     print(instance_df.head()) 
     
@@ -81,6 +85,7 @@ def load_algorithmic_dataset_with_intermediate_steps(algorithm, data_dir, train_
     train_df = instance_df.iloc[train_idxes]
     valid_df = instance_df.iloc[valid_idxes]
     test_df = instance_df.iloc[test_idxes]
+
 
     print("*************train_idxes*************")
     print(train_idxes)
@@ -101,7 +106,11 @@ def load_algorithmic_dataset_with_intermediate_steps(algorithm, data_dir, train_
          if not only_ouptut else ["output"]
 
     train_dataset = generate_dataset(train_df, input_columns=["input"], output_columns=column_names[:])
+    # print("************check1 done")
+    
     valid_dataset = generate_dataset(valid_df, input_columns=["input"], output_columns=column_names[:]) # include all previous steps if concatenate_steps
+    # print("************check2 done")
+    
     test_dataset = generate_dataset(test_df, input_columns=["input"], output_columns=column_names[:]) # include all previous steps if concatenate_steps
     print(f"train size: {len(train_dataset)}, valid size: {len(valid_dataset)}, test size: {len(test_dataset)}")
 
