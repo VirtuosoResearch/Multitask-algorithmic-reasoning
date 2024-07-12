@@ -1,0 +1,25 @@
+2024-05-12 03:12:59,298 - train - INFO - Saving current model: model_epoch_0.pth ...
+2024-05-12 03:13:07,162 - train - INFO -     epoch          : 1
+2024-05-12 03:13:07,162 - train - INFO -     loss           : 3.574318051338196
+2024-05-12 03:13:07,162 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:07,903 - train - INFO -     epoch          : 2
+2024-05-12 03:13:07,904 - train - INFO -     loss           : 3.5662487745285034
+2024-05-12 03:13:07,904 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:08,649 - train - INFO -     epoch          : 3
+2024-05-12 03:13:08,650 - train - INFO -     loss           : 3.518479108810425
+2024-05-12 03:13:08,650 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:09,415 - train - INFO -     epoch          : 4
+2024-05-12 03:13:09,415 - train - INFO -     loss           : 3.452647566795349
+2024-05-12 03:13:09,416 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:10,233 - train - INFO -     epoch          : 5
+2024-05-12 03:13:10,233 - train - INFO -     loss           : 3.3688288927078247
+2024-05-12 03:13:10,233 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:10,988 - train - INFO -     epoch          : 6
+2024-05-12 03:13:10,988 - train - INFO -     loss           : 3.267249345779419
+2024-05-12 03:13:10,989 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:11,780 - train - INFO -     epoch          : 7
+2024-05-12 03:13:11,780 - train - INFO -     loss           : 3.156476616859436
+2024-05-12 03:13:11,780 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-12 03:13:12,526 - train - INFO -     epoch          : 8
+2024-05-12 03:13:12,526 - train - INFO -     loss           : 3.0478099584579468
+2024-05-12 03:13:12,526 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.

@@ -1,0 +1,22 @@
+2024-05-13 10:54:50,038 - train - INFO - Saving current model: model_epoch_0.pth ...
+2024-05-13 10:54:52,706 - train - INFO -     epoch          : 1
+2024-05-13 10:54:52,706 - train - INFO -     loss           : 3.5686848163604736
+2024-05-13 10:54:52,706 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-13 10:54:54,602 - train - INFO -     epoch          : 2
+2024-05-13 10:54:54,602 - train - INFO -     loss           : 3.5411486625671387
+2024-05-13 10:54:54,603 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-13 10:54:56,305 - train - INFO -     epoch          : 3
+2024-05-13 10:54:56,306 - train - INFO -     loss           : 3.4800697962443032
+2024-05-13 10:54:56,306 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-13 10:54:58,327 - train - INFO -     epoch          : 4
+2024-05-13 10:54:58,327 - train - INFO -     loss           : 3.3906349341074624
+2024-05-13 10:54:58,328 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-13 10:55:00,291 - train - INFO -     epoch          : 5
+2024-05-13 10:55:00,291 - train - INFO -     loss           : 3.2747609615325928
+2024-05-13 10:55:00,291 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-13 10:55:02,062 - train - INFO -     epoch          : 6
+2024-05-13 10:55:02,062 - train - INFO -     loss           : 3.145622650782267
+2024-05-13 10:55:02,062 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
+2024-05-13 10:55:04,134 - train - INFO -     epoch          : 7
+2024-05-13 10:55:04,134 - train - INFO -     loss           : 3.022082567214966
+2024-05-13 10:55:04,134 - train - WARNING - Warning: Metric 'val_accuracy' is not found. Model performance monitoring is disabled.
