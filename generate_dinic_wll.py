@@ -87,12 +87,13 @@ def main(args):
         
         max_flow_value = dinic.max_flow(src, sink)
         
+        input = f"{src}-{sink} "
+        input += " ".join([f"{u}-{v}-{capacity}" for u, v, capacity in edges])
+        
         instance = {
             "nodes": n,
-            "edges": " ".join([f"{u}-{v}-{capacity}" for u, v, capacity in edges]),
-            "source": src,
-            "sink": sink,
-            "max_flow": max_flow_value
+            "input": input,
+            "output": max_flow_value
         }
         
         for key, val in instance.items():
@@ -114,9 +115,9 @@ def main(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_size", type=int, default=1000)
+    parser.add_argument("--data_size", type=int, default=100000)
     parser.add_argument("--nodes", type=int, default=10)
-    parser.add_argument("--edges", type=int, default=15)
+    parser.add_argument("--edges", type=int, default=40)
     args = parser.parse_args()
     
     main(args)
