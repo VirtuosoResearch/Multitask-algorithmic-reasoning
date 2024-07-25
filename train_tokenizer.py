@@ -17,8 +17,8 @@ class args:
 train_datasets = []
 # algorithms = ["addition"]
 # csv_dirs = ["digit_5_carry_True"]
-algorithms = ["bfs"]
-csv_dirs = ["bfs_data_10"]
+algorithms = ["bellman"]
+csv_dirs = ["bellman_data_8_16"]
 for algorithm, csv_dir in zip(algorithms, csv_dirs):
     # load data
     file_name = f"./data/{algorithm}/{csv_dir}.csv"
@@ -66,9 +66,9 @@ tokenizer.decoder = decoders.ByteLevel()
 from transformers import GPT2TokenizerFast
 
 wrapped_tokenizer = GPT2TokenizerFast(tokenizer_object=tokenizer)
-wrapped_tokenizer.save_pretrained("./tokenizers/gpt2_bfs")
+wrapped_tokenizer.save_pretrained("./tokenizers/gpt2_bellman")
 # %%
-tokenizer = AutoTokenizer.from_pretrained("./tokenizers/gpt2_bfs", use_fast=True, padding_side="left")
+tokenizer = AutoTokenizer.from_pretrained("./tokenizers/gpt2_bellman", use_fast=True, padding_side="left")
 # %%
 train_dataset = train_dataset.train_test_split(test_size=0.1)
 train_dataset, valid_dataset = train_dataset["train"], train_dataset["test"]
