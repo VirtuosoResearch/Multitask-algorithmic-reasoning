@@ -1,0 +1,7 @@
+from trainer.base_trainer import Trainer
+from trainer.multitask_trainer import MultitaskTrainer
+from trainer.constraint_trainer import ConstraintTrainer, ConstraintMultitaskTrainer
+from trainer.label_smooth_trainer import LabelSmoothTrainer, LabelSmoothMultitaskTrainer
+from trainer.constraint_allocation_trainer import ConstraintAllocationTrainer, ConstraintAllocationMultitaskTrainer
+from trainer.sam_trainer import SAMTrainer, SAMMultitaskTrainer
+from trainer.single_prmpt_multitask_trainer import SinglePromptMultitaskTrainer
