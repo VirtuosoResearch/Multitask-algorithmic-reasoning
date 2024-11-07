@@ -24,8 +24,8 @@ from absl import flags
 import networkx as nx
 import numpy as np
 
-from graphqa import graph_task
-from graphqa import graph_task_utils as utils
+import graph_tasks.graph_task as graph_task
+import graph_tasks.graph_task_utils as utils
 
 _TASK = flags.DEFINE_enum(
     'task',
@@ -111,7 +111,7 @@ def zero_shot(
 
   file_name = task.name + ('_zero_cot_' if cot else '_zero_shot_')
 
-  file_name += split + '.tfrecords'
+  file_name += split
   utils.write_examples(
       zero_shot_examples,
       os.path.join(_TASK_DIR.value, file_name),

@@ -16,8 +16,7 @@
 """Library for encoding graphs in text."""
 
 import networkx as nx
-
-from graphqa import name_dictionaries
+from graph_tasks import name_dictionaries
 
 TEXT_ENCODER_DICT = {
     "adjacency": name_dictionaries.create_name_dict("integer"),

@@ -16,20 +16,20 @@
 set -e
 set -x
 
-python3 -m venv graphqa
-source graphqa/bin/activate
+# python3 -m venv graphqa
+# source graphqa/bin/activate
 
-pip3 install -r graphqa/requirements.txt
+# pip3 install -r graphqa/requirements.txt
 
 # Fill in appropriate output path
-OUTPUT_PATH="~/graphqa/graphs"
+OUTPUT_PATH="~/graph_tasks/graphs"
 
 echo "The output path is set to: $OUTPUT_PATH"
 
 for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path"
 do
   echo "Generating test examples for $algorithm"
-  python3 -m graphqa.graph_generator \
+  python3 -m graph_tasks.graph_generator \
                     --algorithm=$algorithm \
                     --number_of_graphs=500 \
                     --split=test \

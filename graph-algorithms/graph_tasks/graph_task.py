@@ -20,7 +20,7 @@ import random
 import networkx as nx
 import numpy as np
 
-from graphqa import graph_text_encoder
+from graph_tasks import graph_text_encoder
 
 
 class GraphTask:
@@ -144,7 +144,7 @@ class EdgeExistence(GraphTask):
   ):
     examples_dict = {}
     name_dict = graph_text_encoder.TEXT_ENCODER_DICT[encoding_method]
-
+    print(len(generator_algorithms))
     for ind, graph in enumerate(graphs):
       source, target = random.sample(list(graph.nodes()), k=2)
       question = graph_text_encoder.encode_graph(graph, encoding_method)
@@ -159,6 +159,7 @@ class EdgeExistence(GraphTask):
         answer = 'Yes.'
       else:
         answer = 'No.'
+      print(ind, generator_algorithms[ind])
       examples_dict[ind] = {
           'question': question,
           'answer': answer,

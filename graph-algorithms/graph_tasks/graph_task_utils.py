@@ -17,16 +17,16 @@
 
 import os
 import random
-
+import json
 import networkx as nx
-import tensorflow as tf
-from tensorflow.io import gfile
+# import tensorflow as tf
 
-from graphqa import graph_task
-from tensorflow.core.example import example_pb2
-from tensorflow.core.example import feature_pb2
+from graph_tasks import graph_task
+# from tensorflow.core.example import example_pb2
+# from tensorflow.core.example import feature_pb2
 
 
+# change this to not using tensorflow 
 def create_example_feature(
     key,
     question,
@@ -37,30 +37,14 @@ def create_example_feature(
     nedges,
 ):
   """Create a tensorflow example from a datapoint."""
-  key_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[str(key).encode()])
-  )
-  question_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[question.encode()])
-  )
-  answer_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[answer.encode()])
-  )
-  algorithm_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[algorithm.encode()])
-  )
-  encoding_method_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[encoding_method.encode()])
-  )
-  nnodes_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[nnodes.encode()])
-  )
-  nedges_feature = feature_pb2.Feature(
-      bytes_list=tf.train.BytesList(value=[nedges.encode()])
-  )
-  example_feats = tf.train.Features(
-      feature={
-          'id': key_feature,
+  key_feature = str(key)
+  question_feature = question
+  answer_feature = answer
+  algorithm_feature = algorithm
+  encoding_method_feature = encoding_method
+  nnodes_feature = value=[nnodes]
+  nedges_feature = value=[nedges]
+  example_feats = {'id': key_feature,
           'question': question_feature,
           'answer': answer_feature,
           'algorithm': algorithm_feature,
@@ -68,8 +52,7 @@ def create_example_feature(
           'nnodes': nnodes_feature,
           'nedges': nedges_feature,
       }
-  )
-  return example_pb2.Example(features=example_feats)
+  return example_feats
 
 
 def load_graphs(
@@ -85,7 +68,7 @@ def load_graphs(
       split,
   )
   loaded_graphs = []
-  all_files = gfile.listdir(graphs_path)
+  all_files = os.listdir(graphs_path)
   for file in all_files:
     if file.endswith('.graphml'):
       path = os.path.join(graphs_path, file)
@@ -150,10 +133,9 @@ def create_zero_shot_task(
 
 
 def write_examples(examples, output_path):
-  with tf.io.TFRecordWriter(output_path) as file_writer:
-    for example in examples:
-      file_writer.write(example.SerializeToString())
-
+    with open(output_path + ".json", 'w') as file:
+        for example in examples:
+            json.dump(example, file)
 
 def prepare_few_shots(
     task,

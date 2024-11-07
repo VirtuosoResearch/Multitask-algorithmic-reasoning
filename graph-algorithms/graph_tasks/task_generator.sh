@@ -13,18 +13,18 @@
 # limitations under the License.
 
 #!/bin/bash
-set -e
+# set -e
 set -x
 
-python3 -m venv graphqa
-source graphqa/bin/activate
+# python3 -m venv graphqa
+# source graphqa/bin/activate
 
-pip3 install -r graphqa/requirements.txt
+# pip3 install -r graphqa/requirements.txt
 
 # Fill in appropriate output path
-GRAPHS_DIR="/usr/local/google/home/baharef/temp/graphqa"
-TASK_DIR="/usr/local/google/home/baharef/temp/graphqa/tasks"
-TASKS=("edge_existence" "node_degree" "node_count" "edge_count" "cycle_check" "connected_nodes")
+GRAPHS_DIR="./data/graphs"
+TASK_DIR="./data/tasks"
+TASKS=("edge_existence" "node_degree" "node_count" "edge_count" "connected_nodes" "cycle_check" "disconnected_nodes" "reachability" "shortest_path" "maximum_flow" "triangle_counting" "node_classification")
 
 # For experimenting with only erdos-reyni graph use `er``.
 # For all graph generators, set to `all`.
@@ -35,7 +35,7 @@ echo "The output path is set to: $TASK_DIR"
 for  task in "${TASKS[@]}"
 do
   echo "Generating examples for task $task"
-  python3 -m graphqa.graph_task_generator \
+  python3 -m graph_tasks.graph_task_generator \
                 --task=$task \
                 --algorithm=$ALGORITHM \
                 --task_dir=$TASK_DIR \

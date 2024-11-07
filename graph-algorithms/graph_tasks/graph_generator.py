@@ -21,9 +21,8 @@ import os
 from absl import app
 from absl import flags
 import networkx as nx
-from tensorflow.io import gfile
 
-from graphqa import graph_generator_utils
+from graph_tasks import graph_generator_utils
 
 _ALGORITHM = flags.DEFINE_string(
     "algorithm",
@@ -52,8 +51,8 @@ _MAX_SPARSITY = flags.DEFINE_float("max_sparsity", 1.0, "The maximum sparsity.")
 
 def write_graphs(graphs, output_dir):
   """Writes graphs to output_dir."""
-  if not gfile.exists(output_dir):
-    gfile.makedirs(output_dir)
+  if not os.path.exists(output_dir):
+    os.makedirs(output_dir)
   for ind, graph in enumerate(graphs):
     nx.write_graphml(
         graph,
