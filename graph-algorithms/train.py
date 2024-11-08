@@ -259,6 +259,7 @@ if __name__ == "__main__":
                 inference_batch_size=inference_batch_size,
                 max_input_length=args.max_length,
                 max_output_length=args.max_output_length,
+                eval_all=True,
                 downsample_ratio=args.downsample_ratio,
                 minimum_samples=args.minimum_samples,
                 minimum_samples_validation=args.minimum_samples_validation)
@@ -327,24 +328,23 @@ if __name__ == "__main__":
         start_time = time.time()
         if args.epochs > 0:
             trainer.fit(lm, datamodule=data_module)
+            if args.train_lora:
+                from lightning_fabric.utilities.cloud_io import _load as pl_load
+                checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
+                state_dict = checkpoint["state_dict"]
+                state_dict = {k[6:]: v for k, v in state_dict.items() if "lora" in k}
+                torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
+            elif args.train_adapter:
+                from lightning_fabric.utilities.cloud_io import _load as pl_load
+                checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
+                state_dict = checkpoint["state_dict"]
+                state_dict = {k[6:]: v for k, v in state_dict.items() if ("adapter" in k or "head" in k)}
+                torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
         end_time = time.time()
         print(f"Training time: {end_time - start_time}")
 
         # evaluate the best checkpoint
         start_time = time.time()
-        if args.train_lora:
-            from lightning_fabric.utilities.cloud_io import _load as pl_load
-            checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
-            state_dict = checkpoint["state_dict"]
-            state_dict = {k[6:]: v for k, v in state_dict.items() if "lora" in k}
-            torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
-        elif args.train_adapter:
-            from lightning_fabric.utilities.cloud_io import _load as pl_load
-            checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
-            state_dict = checkpoint["state_dict"]
-            state_dict = {k[6:]: v for k, v in state_dict.items() if ("adapter" in k or "head" in k)}
-            torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
-            
             
         if args.epochs > 0:
             if args.use_qadapter or args.use_qlora or args.use_3bit or args.use_2bit:                         

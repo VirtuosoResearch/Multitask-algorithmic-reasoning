@@ -153,6 +153,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
         max_input_length=512,
         max_output_length=64,
         shuffle_train=True,
+        eval_all=False,
         downsample_ratio=1.0, # ratio of downsampling
         minimum_samples=100,
         minimum_samples_validation=100,
@@ -175,6 +176,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
         else:
             self.inference_batch_size = inference_batch_size
         self.shuffle_train = shuffle_train
+        self.eval_all = eval_all
 
         self.downsample_rate = downsample_ratio
         self.downsample_seed = downsample_seed
@@ -208,7 +210,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             permutations = rng.permutation(len(dataset))
             train_size, eval_size, test_size = int(0.6*len(dataset)), int(0.2*len(dataset)), int(0.2*len(dataset)) 
             train_dataset = dataset.select(permutations[:train_size])
-            eval_dataset = dataset.select(permutations[train_size:train_size+eval_size])
+            eval_dataset = dataset.select(permutations[train_size:train_size+eval_size]) if not self.eval_all else dataset
             predict_dataset = dataset.select(permutations[train_size+eval_size:])
 
             # Downsample the dataset if needed

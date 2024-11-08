@@ -1,4 +1,5 @@
 graph-algorithms/data/
 external_lightning_logs/
 results/
+outputs
 __pycache__/
