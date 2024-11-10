@@ -22,16 +22,37 @@ set -x
 # pip3 install -r graphqa/requirements.txt
 
 # Fill in appropriate output path
-OUTPUT_PATH="~/graph_tasks/graphs"
+OUTPUT_PATH="./data/graphs"
 
 echo "The output path is set to: $OUTPUT_PATH"
 
-for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path"
+# for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path"
+# do
+#   echo "Generating test examples for $algorithm"
+#   python3 -m graph_tasks.graph_generator \
+#                     --algorithm=$algorithm \
+#                     --number_of_graphs=500 \
+#                     --split=test \
+#                     --output_path=$OUTPUT_PATH
+# done
+
+
+for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path"
 do
   echo "Generating test examples for $algorithm"
   python3 -m graph_tasks.graph_generator \
                     --algorithm=$algorithm \
                     --number_of_graphs=500 \
-                    --split=test \
+                    --split=valid \
                     --output_path=$OUTPUT_PATH
 done
+
+# for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path"
+# do
+#   echo "Generating test examples for $algorithm"
+#   python3 -m graph_tasks.graph_generator \
+#                     --algorithm=$algorithm \
+#                     --number_of_graphs=10000 \
+#                     --split=train \
+#                     --output_path=$OUTPUT_PATH
+# done

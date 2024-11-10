@@ -40,5 +40,6 @@ do
                 --algorithm=$ALGORITHM \
                 --task_dir=$TASK_DIR \
                 --graphs_dir=$GRAPHS_DIR \
-                --random_seed=1234
+                --random_seed=1234 \
+                --split=valid
 done

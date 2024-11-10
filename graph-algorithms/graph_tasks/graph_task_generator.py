@@ -66,6 +66,9 @@ _RANDOM_SEED = flags.DEFINE_integer(
     'The random seed to use for task generation.',
     required=True,
 )
+_SPLIT = flags.DEFINE_string(
+    "split", None, "The dataset split", required=True
+)
 
 
 TASK_CLASS = {
@@ -206,7 +209,7 @@ def main(argv):
     loaded_graphs = utils.load_graphs(
         _GRAPHS_DIR.value,
         algorithm,
-        'test',
+        _SPLIT.value,
     )
     graphs += loaded_graphs
     generator_algorithms += [algorithm] * len(loaded_graphs)
@@ -232,70 +235,70 @@ def main(argv):
       text_encoders,
       cot=False,
       random_seed=_RANDOM_SEED.value,
-      split='test',
+      split=_SPLIT.value,
   )
-  zero_shot(
-      task,
-      graphs,
-      generator_algorithms,
-      text_encoders,
-      cot=True,
-      random_seed=_RANDOM_SEED.value,
-      split='test',
-  )
+  # zero_shot(
+  #     task,
+  #     graphs,
+  #     generator_algorithms,
+  #     text_encoders,
+  #     cot=True,
+  #     random_seed=_RANDOM_SEED.value,
+  #     split=_SPLIT.value,
+  # )
 
-  # Loading few-shot graphs.
-  few_shot_graphs = []
-  for algorithm in algorithms:
-    few_shot_graphs += utils.load_graphs(
-        _GRAPHS_DIR.value,
-        algorithm,
-        'train',
-    )
+  # # Loading few-shot graphs.
+  # few_shot_graphs = []
+  # for algorithm in algorithms:
+  #   few_shot_graphs += utils.load_graphs(
+  #       _GRAPHS_DIR.value,
+  #       algorithm,
+  #       'train',
+  #   )
 
-  if isinstance(task, graph_task.NodeClassification):
-    # The node classification task requires SBM graphs. As it's not possible to
-    # write graphs with data (e.g., blocks data as in SBM graphs), we regenerate
-    # graphs.
-    random_state = np.random.RandomState(_RANDOM_SEED.value + 1)
-    print('Generating few shot sbm graphs')
-    few_shot_graphs = [
-        generate_random_sbm_graph(random_state)
-        for _ in range(len(few_shot_graphs))
-    ]
+  # if isinstance(task, graph_task.NodeClassification):
+  #   # The node classification task requires SBM graphs. As it's not possible to
+  #   # write graphs with data (e.g., blocks data as in SBM graphs), we regenerate
+  #   # graphs.
+  #   random_state = np.random.RandomState(_RANDOM_SEED.value + 1)
+  #   print('Generating few shot sbm graphs')
+  #   few_shot_graphs = [
+  #       generate_random_sbm_graph(random_state)
+  #       for _ in range(len(few_shot_graphs))
+  #   ]
 
-  few_shot(
-      task,
-      graphs,
-      few_shot_graphs,
-      generator_algorithms,
-      text_encoders,
-      cot=False,
-      bag=False,
-      random_seed=_RANDOM_SEED.value,
-  )
+  # few_shot(
+  #     task,
+  #     graphs,
+  #     few_shot_graphs,
+  #     generator_algorithms,
+  #     text_encoders,
+  #     cot=False,
+  #     bag=False,
+  #     random_seed=_RANDOM_SEED.value,
+  # )
 
-  few_shot(
-      task,
-      graphs,
-      few_shot_graphs,
-      generator_algorithms,
-      text_encoders,
-      cot=True,
-      bag=False,
-      random_seed=_RANDOM_SEED.value,
-  )
+  # few_shot(
+  #     task,
+  #     graphs,
+  #     few_shot_graphs,
+  #     generator_algorithms,
+  #     text_encoders,
+  #     cot=True,
+  #     bag=False,
+  #     random_seed=_RANDOM_SEED.value,
+  # )
 
-  few_shot(
-      task,
-      graphs,
-      few_shot_graphs,
-      generator_algorithms,
-      text_encoders,
-      cot=True,
-      bag=True,
-      random_seed=_RANDOM_SEED.value,
-  )
+  # few_shot(
+  #     task,
+  #     graphs,
+  #     few_shot_graphs,
+  #     generator_algorithms,
+  #     text_encoders,
+  #     cot=True,
+  #     bag=True,
+  #     random_seed=_RANDOM_SEED.value,
+  # )
 
 
 if __name__ == '__main__':

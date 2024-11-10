@@ -193,25 +193,38 @@ class AlgorithmDataModule(pl.LightningDataModule):
             prompt_style = self.prompt_styles[i]
             text_encoder = self.text_encoders[i]
 
-            do_eval = True
-            do_predict = True
-
-            task_file_dir = "./data/tasks/{}_{}_test.json".format(task_name, prompt_style)
-            dataset = load_dataset("json", data_files=task_file_dir)['train']
-
-            # fileter out the examples by the text encoder
-            column_names = dataset.column_names
-            dataset = dataset.filter(lambda x: x["text_encoding"] == text_encoder)
-            # convert the input and output format
-            dataset = dataset.map(convert_format(), batched=True, remove_columns=column_names)
-
             # Split the dataset into train and validation
-            rng = np.random.default_rng(42)
-            permutations = rng.permutation(len(dataset))
-            train_size, eval_size, test_size = int(0.6*len(dataset)), int(0.2*len(dataset)), int(0.2*len(dataset)) 
-            train_dataset = dataset.select(permutations[:train_size])
-            eval_dataset = dataset.select(permutations[train_size:train_size+eval_size]) if not self.eval_all else dataset
-            predict_dataset = dataset.select(permutations[train_size+eval_size:])
+            task_file_dir = "./data/tasks/{}_{}_train.json".format(task_name, prompt_style)
+            train_dataset = load_dataset("json", data_files=task_file_dir)['train']
+            # fileter out the examples by the text encoder
+            column_names = train_dataset.column_names
+            train_dataset = train_dataset.filter(lambda x: x["text_encoding"] == text_encoder)
+            # convert the input and output format
+            train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+
+            task_file_dir = "./data/tasks/{}_{}_valid.json".format(task_name, prompt_style)
+            eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
+            # fileter out the examples by the text encoder
+            column_names = eval_dataset.column_names
+            eval_dataset = eval_dataset.filter(lambda x: x["text_encoding"] == text_encoder)
+            # convert the input and output format
+            eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            
+            task_file_dir = "./data/tasks/{}_{}_test.json".format(task_name, prompt_style)
+            predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
+            # fileter out the examples by the text encoder
+            column_names = predict_dataset.column_names
+            predict_dataset = predict_dataset.filter(lambda x: x["text_encoding"] == text_encoder)
+            # convert the input and output format
+            predict_dataset = predict_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+
+            ''' Old Split '''
+            # rng = np.random.default_rng(42)
+            # permutations = rng.permutation(len(dataset))
+            # train_size, eval_size, test_size = int(0.6*len(dataset)), int(0.2*len(dataset)), int(0.2*len(dataset)) 
+            # train_dataset = dataset.select(permutations[:train_size])
+            # eval_dataset = dataset.select(permutations[train_size:train_size+eval_size]) if not self.eval_all else dataset
+            # predict_dataset = dataset.select(permutations[train_size+eval_size:])
 
             # Downsample the dataset if needed
             if self.downsample_rate < 1.0:
