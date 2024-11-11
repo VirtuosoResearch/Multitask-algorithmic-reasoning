@@ -230,19 +230,19 @@ class AlgorithmDataModule(pl.LightningDataModule):
             if self.downsample_rate < 1.0:
                 rng = np.random.default_rng(self.downsample_seed)
                 permutations = rng.permutation(len(train_dataset))
-                min_sample = max(self.minimum_sample, int(self.downsample_rate*len(train_dataset)))
+                min_sample = max(int(self.minimum_sample), int(self.downsample_rate*len(train_dataset)))
                 train_dataset = train_dataset.select(permutations[:min_sample])
 
             if self.downsample_rate < 1.0:
                 rng = np.random.default_rng(self.downsample_seed)
                 permutations = rng.permutation(len(eval_dataset))
-                min_sample = max(self.minimum_sample_validation, int(self.downsample_rate*len(eval_dataset)))
+                min_sample = max(int(self.minimum_sample_validation), int(self.downsample_rate*len(eval_dataset)))
                 eval_dataset = eval_dataset.select(permutations[:min_sample])
 
             if self.downsample_rate < 1.0:
                 rng = np.random.default_rng(self.downsample_seed)
                 permutations = rng.permutation(len(predict_dataset))
-                min_sample = max(self.minimum_sample_validation, int(self.downsample_rate*len(predict_dataset)))
+                min_sample = max(int(self.minimum_sample_validation), int(self.downsample_rate*len(predict_dataset)))
                 predict_dataset = predict_dataset.select(permutations[:min_sample])
             
             extended_task_name = task_name + "_" + prompt_style

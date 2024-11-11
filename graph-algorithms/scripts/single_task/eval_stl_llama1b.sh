@@ -1,4 +1,4 @@
-for task_name in 'edge_existence' 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
+for task_name in 'edge_existence' 'node_degree' 'node_count' 'edge_count' 'connected_nodes' 'cycle_check' 'disconnected_nodes' 'reachability' 'shortest_path' 'maximum_flow' 'triangle_counting' 'node_classification'
 do
 python train.py --task_names $task_name --prompt_styles "zero_shot" --text_encoders "adjacency"\
     --model_key "meta-llama/Llama-3.2-1B" \
@@ -7,7 +7,7 @@ python train.py --task_names $task_name --prompt_styles "zero_shot" --text_encod
     --save_name test --epochs 0 --precision "bf16-true"  --write_results
 done
 
-for task_name in 'edge_existence' 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
+for task_name in 'edge_existence' 'node_degree' 'node_count' 'edge_count' 'connected_nodes' 'cycle_check' 'disconnected_nodes' 'reachability' 'shortest_path' 'maximum_flow' 'triangle_counting' 'node_classification'
 do
 python train.py --task_names $task_name --prompt_styles "zero_shot" --text_encoders "incident"\
     --model_key "meta-llama/Llama-3.2-1B" \
@@ -16,7 +16,7 @@ python train.py --task_names $task_name --prompt_styles "zero_shot" --text_encod
     --save_name test --epochs 0 --precision "bf16-true"  --write_results
 done
 
-for task_name in 'edge_existence' 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
+for task_name in 'edge_existence' 'node_degree' 'node_count' 'edge_count' 'connected_nodes' 'cycle_check' 'disconnected_nodes' 'reachability' 'shortest_path' 'maximum_flow' 'triangle_counting' 'node_classification'
 do
 python train.py --task_names $task_name --prompt_styles "zero_cot" --text_encoders "adjacency"\
     --model_key "meta-llama/Llama-3.2-1B" \
@@ -25,7 +25,7 @@ python train.py --task_names $task_name --prompt_styles "zero_cot" --text_encode
     --save_name test --epochs 0 --precision "bf16-true"  --write_results
 done
 
-for task_name in 'edge_existence' 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
+for task_name in 'edge_existence' 'node_degree' 'node_count' 'edge_count' 'connected_nodes' 'cycle_check' 'disconnected_nodes' 'reachability' 'shortest_path' 'maximum_flow' 'triangle_counting' 'node_classification'
 do
 python train.py --task_names $task_name --prompt_styles "zero_cot" --text_encoders "incident"\
     --model_key "meta-llama/Llama-3.2-1B" \
