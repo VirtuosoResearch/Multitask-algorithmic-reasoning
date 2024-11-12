@@ -34,6 +34,9 @@ torch.set_float32_matmul_precision("high")
 
 # peft.__version__ '0.12.0'    
 
+# TODO: 
+#   1. change cycle check output to just yes or no
+
 def add_result_to_csv(result_datapoint, file_name):
     for key, val in result_datapoint.items():
         result_datapoint[key] = [val, ]
@@ -231,8 +234,9 @@ if __name__ == "__main__":
     print("-" * 80)
 
     model_key = args.model_key.replace("/", "-").replace("..", "")
-    save_name = (f"_{args.save_name}" if args.save_name else "") + \
-                (f"_lora_r_{args.lora_rank}" if args.train_lora else "") 
+    save_name = model_key + \
+                (f"_{args.save_name}" if args.save_name else "") + \
+                (f"_lora_r_{args.lora_rank}" if args.train_lora else "")
     file_dir = os.path.join("./results/", save_name)
     if not os.path.exists(file_dir):
         os.mkdir(file_dir)
@@ -286,7 +290,7 @@ if __name__ == "__main__":
             raise Exception("external_lightning_logs/ does not exist")
         default_root_dir = os.path.join("external_lightning_logs", 
                                         f"{model_key}_" + \
-                                        "_".join(extended_task_names) + \
+                                        ("_".join(extended_task_names) if len("_".join(extended_task_names)) <= 100 else "{}_tasks".format(len(extended_task_names))) + \
                                         (f"_lora_r_{args.lora_rank}" if args.train_lora else "") + \
                                         (f"_{args.save_name}" if args.save_name else "") + \
                                         f"_run_{run}"
@@ -391,6 +395,6 @@ if __name__ == "__main__":
             for key, val in metrics.items():
                 if task_name in key:
                     tmp_key = key.replace(f"{task_name}_", "")
-                    result_datapoint[tmp_key] = val
+                    result_datapoint[tmp_key] = np.mean(val)
             file_name = os.path.join(file_dir, "results.csv")
             add_result_to_csv(result_datapoint, file_name)
