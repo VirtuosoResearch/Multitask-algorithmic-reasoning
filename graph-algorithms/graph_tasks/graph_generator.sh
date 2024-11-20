@@ -37,7 +37,7 @@ echo "The output path is set to: $OUTPUT_PATH"
 # done
 
 
-for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path"
+for algorithm in "ba" "sbm" "sfn" "complete" "star" "path" #  "er"
 do
   echo "Generating test examples for $algorithm"
   python3 -m graph_tasks.graph_generator \
@@ -47,12 +47,12 @@ do
                     --output_path=$OUTPUT_PATH
 done
 
-# for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path"
-# do
-#   echo "Generating test examples for $algorithm"
-#   python3 -m graph_tasks.graph_generator \
-#                     --algorithm=$algorithm \
-#                     --number_of_graphs=10000 \
-#                     --split=train \
-#                     --output_path=$OUTPUT_PATH
-# done
+for algorithm in "ba" "sbm" "sfn" "complete" "star" "path" # "er"
+do
+  echo "Generating test examples for $algorithm"
+  python3 -m graph_tasks.graph_generator \
+                    --algorithm=$algorithm \
+                    --number_of_graphs=10000 \
+                    --split=train \
+                    --output_path=$OUTPUT_PATH
+done

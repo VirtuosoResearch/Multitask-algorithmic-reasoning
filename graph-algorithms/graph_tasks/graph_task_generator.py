@@ -113,6 +113,8 @@ def zero_shot(
   )
 
   file_name = task.name + ('_zero_cot_' if cot else '_zero_shot_')
+  # write graph generator name
+  file_name += algorithms[0] + '_'
 
   file_name += split
   utils.write_examples(
@@ -161,6 +163,9 @@ def few_shot(
     file_name += '_cot_test.tfrecords'
   else:
     file_name += '_few_shot_test.tfrecords'
+
+  # write graph generator name
+  file_name += algorithms[0]
 
   utils.write_examples(
       few_shot_examples,

@@ -28,10 +28,12 @@ TASKS=("edge_existence" "node_degree" "node_count" "edge_count" "connected_nodes
 
 # For experimenting with only erdos-reyni graph use `er``.
 # For all graph generators, set to `all`.
-ALGORITHM="er"
+# ALGORITHM="er" # 'er', 'ba', 'sbm', 'sfn', 'complete', 'star', 'path'
 
 echo "The output path is set to: $TASK_DIR"
 
+for ALGORITHM in "ba" "sbm" "sfn" "star" "path" "complete"
+do
 for  task in "${TASKS[@]}"
 do
   echo "Generating examples for task $task"
@@ -42,4 +44,20 @@ do
                 --graphs_dir=$GRAPHS_DIR \
                 --random_seed=1234 \
                 --split=valid
+done
+done
+
+for ALGORITHM in "ba" "sbm" "sfn" "star" "path" "complete"
+do
+for  task in "${TASKS[@]}"
+do
+  echo "Generating examples for task $task"
+  python3 -m graph_tasks.graph_task_generator \
+                --task=$task \
+                --algorithm=$ALGORITHM \
+                --task_dir=$TASK_DIR \
+                --graphs_dir=$GRAPHS_DIR \
+                --random_seed=1234 \
+                --split=test
+done
 done
