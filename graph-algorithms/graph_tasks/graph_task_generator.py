@@ -70,6 +70,9 @@ _SPLIT = flags.DEFINE_string(
     "split", None, "The dataset split", required=True
 )
 
+_MIN_NODES = flags.DEFINE_integer("min_nodes", 0, "The minimum number of nodes.")
+_MAX_NODES = flags.DEFINE_integer("max_nodes", 20, "The maximum number of nodes.")
+
 
 TASK_CLASS = {
     'edge_existence': graph_task.EdgeExistence,
@@ -95,6 +98,7 @@ def zero_shot(
     cot,
     random_seed,
     split,
+    nodes_range
 ):
   """Creating zero-shot or zero-cot examples for the given task.
 
@@ -117,9 +121,15 @@ def zero_shot(
   file_name += algorithms[0] + '_'
 
   file_name += split
+
+  file_dir = os.path.join(_TASK_DIR.value,   "nodes_" + str(nodes_range[0]) + "_" + str(nodes_range[1]))
+  if not os.path.exists(file_dir):
+    os.makedirs(file_dir)
   utils.write_examples(
       zero_shot_examples,
-      os.path.join(_TASK_DIR.value, file_name),
+      os.path.join(_TASK_DIR.value, 
+                   "nodes_" + str(nodes_range[0]) + "_" + str(nodes_range[1]), 
+                   file_name),
   )
 
 
@@ -132,6 +142,7 @@ def few_shot(
     cot,
     bag,
     random_seed,
+    nodes_range
 ):
   """Creating few-shot, cot, or cot-bag examples for the given task.
 
@@ -169,7 +180,9 @@ def few_shot(
 
   utils.write_examples(
       few_shot_examples,
-      os.path.join(_TASK_DIR.value, file_name),
+      os.path.join(_TASK_DIR.value,
+                    "nodes_" + str(_MIN_NODES.value) + "_" + str(_MAX_NODES.value),
+                    file_name),
   )
 
 
@@ -198,13 +211,13 @@ def main(argv):
   text_encoders = [
       'adjacency',
       'incident',
-      'coauthorship',
-      'friendship',
-      'south_park',
-      'got',
-      'social_network',
-      'politician',
-      'expert',
+      # 'coauthorship',
+      # 'friendship',
+      # 'south_park',
+      # 'got',
+      # 'social_network',
+      # 'politician',
+      # 'expert',
   ]
 
   # Loading the graphs.
@@ -215,6 +228,7 @@ def main(argv):
         _GRAPHS_DIR.value,
         algorithm,
         _SPLIT.value,
+        nodes_range=(_MIN_NODES.value, _MAX_NODES.value)
     )
     graphs += loaded_graphs
     generator_algorithms += [algorithm] * len(loaded_graphs)
@@ -241,6 +255,7 @@ def main(argv):
       cot=False,
       random_seed=_RANDOM_SEED.value,
       split=_SPLIT.value,
+      nodes_range=(_MIN_NODES.value, _MAX_NODES.value)
   )
   # zero_shot(
   #     task,
@@ -259,6 +274,7 @@ def main(argv):
   #       _GRAPHS_DIR.value,
   #       algorithm,
   #       'train',
+  #       nodes_range=(_MIN_NODES.value, _MAX_NODES.value)
   #   )
 
   # if isinstance(task, graph_task.NodeClassification):

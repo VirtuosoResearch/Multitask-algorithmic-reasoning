@@ -26,33 +26,104 @@ OUTPUT_PATH="./data/graphs"
 
 echo "The output path is set to: $OUTPUT_PATH"
 
-# for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path"
-# do
-#   echo "Generating test examples for $algorithm"
-#   python3 -m graph_tasks.graph_generator \
-#                     --algorithm=$algorithm \
-#                     --number_of_graphs=500 \
-#                     --split=test \
-#                     --output_path=$OUTPUT_PATH
-# done
-
-
-for algorithm in "ba" "sbm" "sfn" "complete" "star" "path" #  "er"
+for node in 20 40 60 80
 do
-  echo "Generating test examples for $algorithm"
-  python3 -m graph_tasks.graph_generator \
-                    --algorithm=$algorithm \
-                    --number_of_graphs=500 \
-                    --split=valid \
-                    --output_path=$OUTPUT_PATH
-done
-
-for algorithm in "ba" "sbm" "sfn" "complete" "star" "path" # "er"
+for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path" #  
 do
   echo "Generating test examples for $algorithm"
   python3 -m graph_tasks.graph_generator \
                     --algorithm=$algorithm \
                     --number_of_graphs=10000 \
                     --split=train \
-                    --output_path=$OUTPUT_PATH
+                    --output_path=$OUTPUT_PATH \
+                    --min_nodes $node --max_nodes $((node+20))
+done
+
+for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path" # 
+do
+  echo "Generating test examples for $algorithm"
+  python3 -m graph_tasks.graph_generator \
+                    --algorithm=$algorithm \
+                    --number_of_graphs=500 \
+                    --split=test \
+                    --output_path=$OUTPUT_PATH\
+                    --min_nodes $node --max_nodes $((node+20))
+done
+
+
+for algorithm in "er" "ba" "sbm" "sfn" "complete" "star" "path" # 
+do
+  echo "Generating test examples for $algorithm"
+  python3 -m graph_tasks.graph_generator \
+                    --algorithm=$algorithm \
+                    --number_of_graphs=500 \
+                    --split=valid \
+                    --output_path=$OUTPUT_PATH \
+                    --min_nodes $node --max_nodes $((node+20))
+done
+done
+
+
+# Fill in appropriate output path
+GRAPHS_DIR="./data/graphs"
+TASK_DIR="./data/tasks"
+TASKS=("edge_existence" "node_degree" "node_count" "edge_count" "connected_nodes" "cycle_check" "disconnected_nodes" "reachability" "shortest_path" "maximum_flow" "triangle_counting" "node_classification")
+# TASKS=("maximum_flow")
+
+# For experimenting with only erdos-reyni graph use `er``.
+# For all graph generators, set to `all`.
+# ALGORITHM="er" # 'er', 'ba', 'sbm', 'sfn', 'complete', 'star', 'path'
+
+echo "The output path is set to: $TASK_DIR"
+
+for node in 20 40 60 80
+do
+for ALGORITHM in "er" "ba" "sbm" "sfn" # "star" "path" "complete"
+do
+for  task in "${TASKS[@]}"
+do
+  echo "Generating examples for task $task"
+  python3 -m graph_tasks.graph_task_generator \
+                --task=$task \
+                --algorithm=$ALGORITHM \
+                --task_dir=$TASK_DIR \
+                --graphs_dir=$GRAPHS_DIR \
+                --random_seed=1234 \
+                --split=train \
+                --min_nodes $node --max_nodes $((node+20))
+done
+done
+
+
+for ALGORITHM in "er" "ba" "sbm" "sfn" # "star" "path" "complete"
+do
+for  task in "${TASKS[@]}"
+do
+  echo "Generating examples for task $task"
+  python3 -m graph_tasks.graph_task_generator \
+                --task=$task \
+                --algorithm=$ALGORITHM \
+                --task_dir=$TASK_DIR \
+                --graphs_dir=$GRAPHS_DIR \
+                --random_seed=1234 \
+                --split=valid \
+                --min_nodes $node --max_nodes $((node+20))
+done
+done
+
+for ALGORITHM in "er" "ba" "sbm" "sfn" # "star" "path" "complete"
+do
+for  task in "${TASKS[@]}"
+do
+  echo "Generating examples for task $task"
+  python3 -m graph_tasks.graph_task_generator \
+                --task=$task \
+                --algorithm=$ALGORITHM \
+                --task_dir=$TASK_DIR \
+                --graphs_dir=$GRAPHS_DIR \
+                --random_seed=1234 \
+                --split=test \
+                --min_nodes $node --max_nodes $((node+20))
+done
+done
 done

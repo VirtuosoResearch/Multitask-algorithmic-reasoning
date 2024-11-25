@@ -47,6 +47,8 @@ _SPLIT = flags.DEFINE_string(
 )
 _MIN_SPARSITY = flags.DEFINE_float("min_sparsity", 0.0, "The minimum sparsity.")
 _MAX_SPARSITY = flags.DEFINE_float("max_sparsity", 1.0, "The maximum sparsity.")
+_MIN_NODES = flags.DEFINE_integer("min_nodes", 0, "The minimum number of nodes.")
+_MAX_NODES = flags.DEFINE_integer("max_nodes", 20, "The maximum number of nodes.")
 
 
 def write_graphs(graphs, output_dir):
@@ -83,12 +85,14 @@ def main(argv):
       random_seed=random_seed,
       er_min_sparsity=_MIN_SPARSITY.value,
       er_max_sparsity=_MAX_SPARSITY.value,
+      nodes_range=(_MIN_NODES.value, _MAX_NODES.value),
   )
   write_graphs(
       graphs=generated_graphs,
       output_dir=os.path.join(
           _OUTPUT_PATH.value,
           _ALGORITHM.value,
+          "nodes_" + str(_MIN_NODES.value) + "_" + str(_MAX_NODES.value),
           _SPLIT.value,
       ),
   )

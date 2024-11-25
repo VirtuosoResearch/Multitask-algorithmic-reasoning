@@ -40,6 +40,7 @@ def generate_graphs(
     random_seed = 1234,
     er_min_sparsity = 0.0,
     er_max_sparsity = 1.0,
+    nodes_range=(0, 20)
 ):
   """Generating multiple graphs using the provided algorithms.
 
@@ -68,7 +69,7 @@ def generate_graphs(
   if algorithm == "er":
     for i in range(number_of_graphs):
       sparsity = random.uniform(er_min_sparsity, er_max_sparsity)
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       generated_graphs.append(
           nx.erdos_renyi_graph(
               number_of_nodes, sparsity, seed=random_state, directed=directed
@@ -76,7 +77,7 @@ def generate_graphs(
       )
   elif algorithm == "ba":
     for i in range(number_of_graphs):
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       m = random.randint(1, number_of_nodes - 1)
       generated_graph = nx.barabasi_albert_graph(
           number_of_nodes, m, seed=random_state
@@ -87,7 +88,7 @@ def generate_graphs(
         generated_graphs.append(generated_graph)
   elif algorithm == "sbm":
     for i in range(number_of_graphs):
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       number_of_communities = random.choice(
           _NUMBER_OF_COMMUNITIES_RANGE[graph_sizes[i]]
       )
@@ -119,7 +120,7 @@ def generate_graphs(
       generated_graphs.append(sbm_graph)
   elif algorithm == "sfn":
     for i in range(number_of_graphs):
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       generated_graph = nx.scale_free_graph(number_of_nodes, seed=random_state)
       # sfn graphs are by defaukt directed.
       if not directed:
@@ -128,14 +129,14 @@ def generate_graphs(
         generated_graphs.append(generated_graph)
   elif algorithm == "complete":
     for i in range(number_of_graphs):
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       create_using = nx.DiGraph if directed else nx.Graph
       generated_graphs.append(
           nx.complete_graph(number_of_nodes, create_using=create_using)
       )
   elif algorithm == "star":
     for i in range(number_of_graphs):
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       # number_of_nodes for star is the input + a center node.
       generated_graph = nx.star_graph(number_of_nodes - 1)
       if directed:
@@ -144,7 +145,7 @@ def generate_graphs(
         generated_graphs.append(generated_graph)
   elif algorithm == "path":
     for i in range(number_of_graphs):
-      number_of_nodes = random.choice(_NUMBER_OF_NODES_RANGE[graph_sizes[i]])
+      number_of_nodes = random.choice(np.arange(*nodes_range))
       create_using = nx.DiGraph if directed else nx.Graph
       generated_graphs.append(
           nx.path_graph(number_of_nodes, create_using=create_using)

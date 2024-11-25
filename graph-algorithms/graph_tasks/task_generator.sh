@@ -25,6 +25,7 @@ set -x
 GRAPHS_DIR="./data/graphs"
 TASK_DIR="./data/tasks"
 TASKS=("edge_existence" "node_degree" "node_count" "edge_count" "connected_nodes" "cycle_check" "disconnected_nodes" "reachability" "shortest_path" "maximum_flow" "triangle_counting" "node_classification")
+# TASKS=("maximum_flow")
 
 # For experimenting with only erdos-reyni graph use `er``.
 # For all graph generators, set to `all`.
@@ -32,7 +33,7 @@ TASKS=("edge_existence" "node_degree" "node_count" "edge_count" "connected_nodes
 
 echo "The output path is set to: $TASK_DIR"
 
-for ALGORITHM in "ba" "sbm" "sfn" "star" "path" "complete"
+for ALGORITHM in "er" # "ba" "sbm" "sfn" "star" "path" "complete"
 do
 for  task in "${TASKS[@]}"
 do
@@ -43,11 +44,13 @@ do
                 --task_dir=$TASK_DIR \
                 --graphs_dir=$GRAPHS_DIR \
                 --random_seed=1234 \
-                --split=valid
+                --split=train \
+                --min_nodes 50 --max_nodes 100
 done
 done
 
-for ALGORITHM in "ba" "sbm" "sfn" "star" "path" "complete"
+
+for ALGORITHM in "er" # "ba" "sbm" "sfn" "star" "path" "complete"
 do
 for  task in "${TASKS[@]}"
 do
@@ -58,6 +61,23 @@ do
                 --task_dir=$TASK_DIR \
                 --graphs_dir=$GRAPHS_DIR \
                 --random_seed=1234 \
-                --split=test
+                --split=valid \
+                --min_nodes 50 --max_nodes 100
+done
+done
+
+for ALGORITHM in "er" # "ba" "sbm" "sfn" "star" "path" "complete"
+do
+for  task in "${TASKS[@]}"
+do
+  echo "Generating examples for task $task"
+  python3 -m graph_tasks.graph_task_generator \
+                --task=$task \
+                --algorithm=$ALGORITHM \
+                --task_dir=$TASK_DIR \
+                --graphs_dir=$GRAPHS_DIR \
+                --random_seed=1234 \
+                --split=test \
+                --min_nodes 50 --max_nodes 100
 done
 done

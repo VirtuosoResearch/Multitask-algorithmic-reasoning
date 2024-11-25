@@ -915,7 +915,7 @@ def add_edge_weight(graph):
     return graph
   else:
     for edge in graph.edges():
-      graph[edge[0]][edge[1]]['weight'] = random.randint(1, 10)
+      graph[edge[0]][edge[1]]['weight'] = 1 # random.randint(1, 10)
     return graph
 
 

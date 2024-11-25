@@ -19,8 +19,8 @@ import networkx as nx
 from graph_tasks import name_dictionaries
 
 TEXT_ENCODER_DICT = {
-    "adjacency": name_dictionaries.create_name_dict("integer"),
-    "incident": name_dictionaries.create_name_dict("integer"),
+    "adjacency": name_dictionaries.create_name_dict("integer", nnodes=1000),
+    "incident": name_dictionaries.create_name_dict("integer", nnodes=1000),
     "friendship": name_dictionaries.create_name_dict("popular"),
     "south_park": name_dictionaries.create_name_dict("south_park"),
     "got": name_dictionaries.create_name_dict("got"),
