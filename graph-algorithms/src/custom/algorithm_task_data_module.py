@@ -147,6 +147,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
         task_names, 
         prompt_styles,
         text_encoders,
+        node_range,
         tokenizer,
         batch_size=8,
         inference_batch_size=32,
@@ -164,6 +165,8 @@ class AlgorithmDataModule(pl.LightningDataModule):
         self.task_names = task_names # task_name
         self.prompt_styles = prompt_styles # zero_shot, zero_cot, few_shot, few_cot
         self.text_encoders = text_encoders 
+        self.min_nodes = node_range[0]
+        self.max_nodes = node_range[1]
         # "adjacency" "incident" "friendship" "south_park" "got" "politician"
         # "social_network" "expert" "coauthorship" "random" 
 
@@ -194,7 +197,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             text_encoder = self.text_encoders[i]
 
             # Split the dataset into train and validation
-            task_file_dir = "./data/tasks/{}_{}_train.json".format(task_name, prompt_style)
+            task_file_dir = "./data/tasks/nodes_{}_{}/{}_{}_train.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             train_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
@@ -202,7 +205,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
 
-            task_file_dir = "./data/tasks/{}_{}_valid.json".format(task_name, prompt_style)
+            task_file_dir = "./data/tasks/nodes_{}_{}/{}_{}_valid.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = eval_dataset.column_names
@@ -210,7 +213,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
             
-            task_file_dir = "./data/tasks/{}_{}_test.json".format(task_name, prompt_style)
+            task_file_dir = "./data/tasks/nodes_{}_{}/{}_{}_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = predict_dataset.column_names
