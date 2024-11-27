@@ -1,26 +1,32 @@
 # %%
 import clrs
 
-# %%
-# 'insertion_sort'
-# 'bubble_sort'
-# 'heapsort'
-# 'quicksort'
-train_ds, num_samples, spec = clrs.create_dataset(
-      folder='./data/CLRS', algorithm='bubble_sort',
-      split='train', batch_size=32)
+for algorithm in [
+    'insertion_sort', 'bubble_sort', 'heapsort', 'quicksort', 
+                  'activity_selector', 'articulation_points', 'bellman_ford', 'bfs',
+                  'binary_search', 'bridges', 
+                  'dag_shortest_paths', 'dfs', 'dijkstra',
+                  'find_maximum_subarray_kadane', 'floyd_warshall', 'graham_scan', 
+                  'jarvis_march', 'kmp_matcher', 'lcs_length', 'matrix_chain_order', 
+                  'minimum', 'mst_kruskal', 'mst_prim', 'naive_string_matcher',
+                  'optimal_bst', 'quickselect', 'segments_intersect', 'strongly_connected_components',
+                  'task_scheduling', 'topological_sort',]:
 
-# %%
-for i, feedback in enumerate(train_ds.as_numpy_iterator()):
-    print(feedback)
+    train_ds, num_samples, spec = clrs.create_dataset(
+        folder='./data/CLRS', algorithm=algorithm,
+        split='train', batch_size=32)
+
+    for i, feedback in enumerate(train_ds.as_numpy_iterator()):
+        print(feedback)
+        break
+
+    features = feedback.features
+    outputs = feedback.outputs
+    inputs = features.inputs # inputs "key" and "pos"
+    hints = features.hints
+    lengths = features.lengths
+    print(algorithm, [input.name for input in inputs])
     break
-
-# %%
-features = feedback.features
-outputs = feedback.outputs
-inputs = features.inputs # inputs "key" and "pos"
-hints = features.hints
-lengths = features.lengths
 
 # Hints in insertion sort
 #       i: correct place for the  j-th element at the start of each iteration
@@ -38,6 +44,24 @@ lengths = features.lengths
 #       j: the index that scans the array
 #       pred_h: predecessor pointers
 #       r: the rightmost index of the current sort array
+
+# %%
+import torch
+from torch_geometric.data import Data, Dataset, Batch
+from torch_geometric.utils.convert import from_scipy_sparse_matrix
+from scipy.sparse import coo_matrix
+
+class CLRSData(Data):
+    """A data object for CLRS data."""
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        
+data = torch.load("./data/CLRS/processed_train/insertion_sort/data_0.pt")
+
+# %%
+from data_loader import CLRSDataset
+
+dataset = CLRSDataset()
 
 # %%
 # best case: the array is already sorted
