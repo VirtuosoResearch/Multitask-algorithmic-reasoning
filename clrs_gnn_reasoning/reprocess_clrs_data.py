@@ -173,9 +173,9 @@ for algorithm in [
 
     train_ds, num_samples, spec = clrs.create_dataset(
         folder='./data/CLRS', algorithm=algorithm,
-        split='eval', batch_size=1)
+        split='val', batch_size=1)
     
-    root_dir = "./data/CLRS/processed_eval"
+    root_dir = "./data/CLRS/processed_val"
     processed_dir = osp.join(root_dir, algorithm)
     if not osp.exists(processed_dir):
         os.makedirs(processed_dir)
