@@ -39,10 +39,10 @@ class SALSACLRSModel(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         output, hints, hidden = self.model(batch)
         loss, outloss, hintloss, hiddenloss = self._loss(batch, output, hints, hidden)
-        self.log("train/outloss", outloss, batch_size=batch.num_graphs)
-        self.log("train/hintloss", hintloss, batch_size=batch.num_graphs)
+        self.log("train/outloss", outloss, batch_size=batch.num_graphs, prog_bar=True)
+        self.log("train/hintloss", hintloss, batch_size=batch.num_graphs, prog_bar=True)
         self.log("train/hiddenloss", hiddenloss, batch_size=batch.num_graphs)
-        self.log("train/loss", loss, batch_size=batch.num_graphs)
+        self.log("train/loss", loss, batch_size=batch.num_graphs, prog_bar=True)
         self.log('train/lr', self.trainer.optimizers[0].param_groups[0]['lr'])
         return loss
 

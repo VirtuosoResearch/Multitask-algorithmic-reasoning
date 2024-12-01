@@ -22,7 +22,7 @@ logger.add(sys.stderr, level="INFO")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None):
+def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None, devices=[0]):
     callbacks = []
     # checkpointing
     if checkpoint_dir is not None:
@@ -37,12 +37,12 @@ def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None):
 
     # Setup trainer
     trainer = pl.Trainer(
-        devices=[0],
+        devices=devices,
         enable_checkpointing=True,
         callbacks=[ckpt_cbk, early_stop_cbk],
         max_epochs=cfg.TRAIN.MAX_EPOCHS,
         logger=None,
-        accelerator="auto",
+        accelerator="gpu",
         log_every_n_steps=5,
         gradient_clip_val=cfg.TRAIN.GRADIENT_CLIP_VAL,
         reload_dataloaders_every_n_epochs=datamodule.reload_every_n_epochs,
@@ -95,9 +95,12 @@ def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
+    parser.add_argument("--algorithm", type=str, required=True)
     parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--hints", action="store_true", help="Use hints.")
+
+    parser.add_argument("--devices", type=int, nargs="+", default=[0], help="Devices to use")
     args = parser.parse_args()
 
     # set seed
@@ -117,9 +120,9 @@ if __name__ == '__main__':
     torch.set_float32_matmul_precision('medium')
 
     # load datasets
-    train_ds = CLRSDataset(algorithm="bfs", split="train", num_samples=1000)
-    val_ds = CLRSDataset(algorithm="bfs", split="val", num_samples=32)
-    test_ds = CLRSDataset(algorithm="bfs", split="test", num_samples=32) 
+    train_ds = CLRSDataset(algorithm=args.algorithm, split="train", num_samples=1000)
+    val_ds = CLRSDataset(algorithm=args.algorithm, split="val", num_samples=32)
+    test_ds = CLRSDataset(algorithm=args.algorithm, split="test", num_samples=32) 
     specs = train_ds.specs
     
     # load model
@@ -129,4 +132,4 @@ if __name__ == '__main__':
     model = SALSACLRSModel(specs=train_ds.specs, cfg=cfg)
 
     ckpt_dir = "./saved/"
-    train(model, datamodule, cfg, train_ds.specs, seed = args.seed, checkpoint_dir=ckpt_dir)
+    train(model, datamodule, cfg, train_ds.specs, seed = args.seed, checkpoint_dir=ckpt_dir, devices=args.devices)
