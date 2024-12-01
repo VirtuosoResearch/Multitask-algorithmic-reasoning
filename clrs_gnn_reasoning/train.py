@@ -1,22 +1,3 @@
-# # %%
-# from data_loader import SALSACLRSDataModule
-# datamodule = SALSACLRSDataModule(train_dataset=train_ds,
-#                                  val_datasets=val_ds, 
-#                                  test_datasets=test_ds, 
-#                                  batch_size=8, 
-#                                  num_workers=4, 
-#                                  test_batch_size=8)
-# # # %%
-# # train_dataloader= datamodule.train_dataloader()
-# # for batch in train_dataloader:
-# #     print(batch)
-# #     break
-
-# # %%
-# from core.module import SALSACLRSModel
-# model = SALSACLRSModel(specs=train_ds.specs, cfg=cfg)
-
-import logging
 import os
 import sys
 from typing import Optional, Any, Dict
@@ -26,7 +7,6 @@ import csv
 import torch
 from loguru import logger
 import lightning.pytorch as pl
-import warnings
 import argparse
 import os
 import math
@@ -36,12 +16,6 @@ from core.config import load_cfg
 from core.utils import NaNException
 from data_loader import CLRSData, CLRSDataset, CLRSDataModule
 
-from torch_geometric.data import Data, Dataset, Batch
-from torch_geometric.utils.convert import from_scipy_sparse_matrix
-
-
-
-
 logger.remove()
 logger.add(sys.stderr, level="INFO")
 
@@ -50,7 +24,9 @@ def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None):
     callbacks = []
     # checkpointing
     if checkpoint_dir is not None:
-        ckpt_cbk = pl.callbacks.ModelCheckpoint(dirpath=os.path.join(cfg.DATA.ROOT, "checkpoints", str(cfg.ALGORITHM), cfg.RUN_NAME), monitor="val/loss/0", mode="min", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
+        ckpt_cbk = pl.callbacks.ModelCheckpoint(
+            dirpath=os.path.join(cfg.DATA.ROOT, "checkpoints", str(cfg.ALGORITHM), cfg.RUN_NAME), 
+            monitor="val/loss/0", mode="min", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
         callbacks.append(ckpt_cbk)
 
     # early stopping
@@ -139,8 +115,8 @@ if __name__ == '__main__':
 
     # load datasets
     train_ds = CLRSDataset(algorithm="bfs", split="train", num_samples=1000)
-    val_ds = CLRSDataset(algorithm="bfs", split="val", num_samples=100)
-    test_ds = CLRSDataset(algorithm="bfs", split="test", num_samples=100) 
+    val_ds = CLRSDataset(algorithm="bfs", split="val", num_samples=32)
+    test_ds = CLRSDataset(algorithm="bfs", split="test", num_samples=32) 
     specs = train_ds.specs
     
     # load model

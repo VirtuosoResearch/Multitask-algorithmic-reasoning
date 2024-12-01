@@ -32,7 +32,7 @@ def to_data(inputs, hints, outputs, use_hints=True):
     input_attributes = []
     hint_attributes = []
     output_attributes = []
-    data_dict['length'] = inputs[0].data[0].shape[0]
+    data_dict['length'] = hints[0].data.shape[0]
     
     # first get the edge index; create a fully connected graph 
     input_keywords = [dp.name for dp in inputs]
@@ -157,7 +157,6 @@ for algorithm in [
         lengths = features.lengths
         
         data = to_data(inputs, hints, outputs)
-        # print(algorithm, data)
         torch.save(data, osp.join(processed_dir, f'data_{i}.pt'))
 # %%
 

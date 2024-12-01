@@ -35,7 +35,7 @@ def to_data(inputs, hints, outputs, use_hints=True):
     input_attributes = []
     hint_attributes = []
     output_attributes = []
-    data_dict['length'] = inputs[0].data[0].shape[0]
+    data_dict['length'] = hints[0].data.shape[0]
     
     # first get the edge index; create a fully connected graph 
     input_keywords = [dp.name for dp in inputs]
@@ -216,7 +216,6 @@ class CLRSDataset(Dataset):
             lengths = features.lengths
             
             data = to_data(inputs, hints, outputs)
-            # print(algorithm, data)
             torch.save(data, osp.join(processed_dir, f'data_{i}.pt'))
 
     def len(self):
@@ -248,7 +247,6 @@ class CLRSCollater(object):
                 # pad randomness
                 if "randomness" in data.inputs:
                     data["randomness"] = torch.cat([data["randomness"], torch.zeros(*data["randomness"].shape[:1], max_len - data["randomness"].shape[1], *data["randomness"].shape[2:])], dim=1)
-
         return batch
     
     def collate(self, batch):
