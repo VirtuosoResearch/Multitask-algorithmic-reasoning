@@ -14,6 +14,7 @@ from .metrics import calc_metrics
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 
+import numpy as np
 
 class SALSACLRSModel(pl.LightningModule):
     def __init__(self, specs, cfg):
@@ -55,6 +56,7 @@ class SALSACLRSModel(pl.LightningModule):
         output.update({f"{m}_metric": metrics[m] for m in metrics})
         output["batch_size"] = torch.tensor(batch.num_graphs).float()
         output["num_nodes"] = torch.tensor(batch.num_nodes).float()
+        output["loss"] = loss.cpu()
         return loss, output
 
     def _end_of_epoch_metrics(self, dataloader_idx):
@@ -74,30 +76,35 @@ class SALSACLRSModel(pl.LightningModule):
     
     def validation_step(self, batch, batch_idx, dataloader_idx=0):
         loss, output = self._shared_eval(batch, dataloader_idx, "val")
-        self.log(f'val/loss/{self.trainer.datamodule.get_val_loader_nickname(dataloader_idx)}', loss, batch_size=batch.num_graphs, add_dataloader_idx=False)
+        self.log(f'val_loss', loss, batch_size=batch.num_graphs, add_dataloader_idx=False)
 
         self.step_output_cache[dataloader_idx].append(output)
         return loss
     
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         loss, output = self._shared_eval(batch, dataloader_idx, "test")
-        self.log(f'test/loss/{self.trainer.datamodule.get_test_loader_nickname(dataloader_idx)}', loss, batch_size=batch.num_graphs, add_dataloader_idx=False)
+        self.log(f'test_loss', loss, batch_size=batch.num_graphs, add_dataloader_idx=False)
 
         self.step_output_cache[dataloader_idx].append(output)
         return loss
     
     def on_validation_epoch_end(self):
+        summary = defaultdict(list)
         for dataloader_idx in self.step_output_cache.keys():
             metrics = self._end_of_epoch_metrics(dataloader_idx)
             for key in metrics:
-                self.log(f"val/{key}", metrics[key], add_dataloader_idx=False)
+                self.log(f"val_{key}", metrics[key], add_dataloader_idx=False)
+                summary[f"val_{key}"].append(metrics[key])
+        for key in summary:
+            summary[key] = np.mean(summary[key])
+        print(summary)
         self.step_output_cache.clear()
 
     def on_test_epoch_end(self):
         for dataloader_idx in self.step_output_cache.keys():
             metrics = self._end_of_epoch_metrics(dataloader_idx)
             for key in metrics:
-                self.log(f"test/{key}/{self.trainer.datamodule.get_test_loader_nickname(dataloader_idx)}", metrics[key], add_dataloader_idx=False)
+                self.log(f"test_{key}", metrics[key], add_dataloader_idx=False)
         self.step_output_cache.clear()  
 
     def configure_optimizers(self):
@@ -107,12 +114,12 @@ class SALSACLRSModel(pl.LightningModule):
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.cfg.TRAIN.OPTIMIZER.LR)
         else:
             raise NotImplementedError(f"Optimizer {self.cfg.TRAIN.OPTIMIZER.NAME} not implemented")
-        out = {"optimizer": optimizer, "monitor": "val/loss/0", "interval": "step", "frequency": 1}
+        out = {"optimizer": optimizer, "monitor": "val_loss", "interval": "step", "frequency": 1}
         if self.cfg.TRAIN.SCHEDULER.ENABLE:
             try:
                 scheduler = getattr(torch.optim.lr_scheduler, self.cfg.TRAIN.SCHEDULER.NAME)(optimizer, **self.cfg.TRAIN.SCHEDULER.PARAMS[0])
                 out["lr_scheduler"] = scheduler
-                out['monitor'] = 'val/loss/0'
+                out['monitor'] = 'val_loss'
                 
             except AttributeError:
                 raise NotImplementedError(f"Scheduler {self.cfg.TRAIN.SCHEDULER.NAME} not implemented")

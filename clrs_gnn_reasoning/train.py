@@ -19,18 +19,20 @@ from data_loader import CLRSData, CLRSDataset, CLRSDataModule
 logger.remove()
 logger.add(sys.stderr, level="INFO")
 
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
 
 def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None):
     callbacks = []
     # checkpointing
     if checkpoint_dir is not None:
         ckpt_cbk = pl.callbacks.ModelCheckpoint(
-            dirpath=os.path.join(cfg.DATA.ROOT, "checkpoints", str(cfg.ALGORITHM), cfg.RUN_NAME), 
-            monitor="val/loss/0", mode="min", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
+            dirpath=os.path.join("./checkpoints", str(cfg.ALGORITHM), cfg.RUN_NAME), 
+            monitor="val_loss", mode="min", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
         callbacks.append(ckpt_cbk)
 
     # early stopping
-    early_stop_cbk = pl.callbacks.EarlyStopping(monitor="val/loss/0", patience=cfg.TRAIN.EARLY_STOPPING_PATIENCE, mode="min", verbose=True)
+    early_stop_cbk = pl.callbacks.EarlyStopping(monitor="val_loss", patience=cfg.TRAIN.EARLY_STOPPING_PATIENCE, mode="min", verbose=True)
     callbacks.append(early_stop_cbk)
 
     # Setup trainer
@@ -72,6 +74,7 @@ def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None):
     # Test
     logger.info("Testing best model...")
     results = trainer.test(model, datamodule=datamodule)
+    print(results)
 
     # Log results
     stacked_results = {}

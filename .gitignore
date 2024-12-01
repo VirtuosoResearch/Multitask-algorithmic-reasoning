@@ -3,3 +3,7 @@ external_lightning_logs/
 results/
 outputs
 __pycache__/
+CLRS/
+SALSA-CLRS/
+lightning_logs/
+checkpoints/
