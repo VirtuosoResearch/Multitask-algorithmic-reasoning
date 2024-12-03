@@ -15,6 +15,7 @@ from core.module import SALSACLRSModel
 from core.config import load_cfg
 from core.utils import NaNException
 from data_loader import CLRSData, CLRSDataset, CLRSDataModule
+import numpy as np
 
 logger.remove()
 logger.add(sys.stderr, level="INFO")
@@ -22,17 +23,17 @@ logger.add(sys.stderr, level="INFO")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None, devices=[0]):
+def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None, devices=[0], run_name=None):
     callbacks = []
     # checkpointing
     if checkpoint_dir is not None:
         ckpt_cbk = pl.callbacks.ModelCheckpoint(
-            dirpath=os.path.join("./checkpoints", str(cfg.ALGORITHM), cfg.RUN_NAME), 
-            monitor="val_loss", mode="min", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
+            dirpath=os.path.join("./checkpoints", str(cfg.ALGORITHM), run_name), 
+            monitor="val_node_accuracy", mode="max", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
         callbacks.append(ckpt_cbk)
 
     # early stopping
-    early_stop_cbk = pl.callbacks.EarlyStopping(monitor="val_loss", patience=cfg.TRAIN.EARLY_STOPPING_PATIENCE, mode="min", verbose=True)
+    early_stop_cbk = pl.callbacks.EarlyStopping(monitor="val_node_accuracy", patience=cfg.TRAIN.EARLY_STOPPING_PATIENCE, mode="max", verbose=True)
     callbacks.append(early_stop_cbk)
 
     # Setup trainer
@@ -73,47 +74,51 @@ def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None, devices=[
 
     # Test
     logger.info("Testing best model...")
-    results = trainer.test(model, datamodule=datamodule)
+    results = trainer.validate(model, datamodule=datamodule)[0]
+    test_results = trainer.test(model, datamodule=datamodule)[0]
+    results.update(test_results)
     print(results)
-
-    # Log results
-    stacked_results = {}
-    for d in results:
-        stacked_results.update(d)
-
-    logger.info(stacked_results)
-    logger.info("Saving results...")
-    results_dir = f"results/{cfg.ALGORITHM}/{cfg.RUN_NAME}"
-    if not os.path.exists(results_dir):
-        os.makedirs(results_dir, exist_ok=True)
-
-    # write csv
-    with open(os.path.join(results_dir, f"{seed}.csv"), "w") as f:
-        writer = csv.DictWriter(f, stacked_results.keys())
-        writer.writeheader()
-        writer.writerow(stacked_results)
+    return results
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("--algorithm", type=str, required=True)
     parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--hints", action="store_true", help="Use hints.")
+    # datasets
+    parser.add_argument("--algorithm", type=str, required=True)
+    # training
+    parser.add_argument("--optimizer", type=str, default="adamw", help="Optimizer")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
+    parser.add_argument("--loss_weight_output", type=float, default=1.0, help="Output loss weight.")
+    parser.add_argument("--loss_weight_hint", type=float, default=1.0, help="Hint loss weight.")
+    parser.add_argument("--loss_weight_hidden", type=float, default=0.01, help="KL loss weight.")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of epochs")
+    # model
+    parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension")
+    parser.add_argument("--gnn_layers", type=int, default=2, help="Message passing steps")
+    parser.add_argument("--enable_gru", action="store_true", help="Enable GRU")
 
+    parser.add_argument("--runs", type=int, default=1, help="Number of runs")
     parser.add_argument("--devices", type=int, nargs="+", default=[0], help="Devices to use")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
-
-    # set seed
-    pl.seed_everything(args.seed)
-    logger.info(f"Using seed {args.seed}")
 
     # load config
     cfg = load_cfg(args.cfg)
+    cfg.ALGORITHM = args.algorithm
+    cfg.TRAIN.OPTIMIZER.NAME = args.optimizer
+    cfg.TRAIN.OPTIMIZER.LR = args.lr
+    cfg.TRAIN.LOSS.OUTPUT_LOSS_WEIGHT = args.loss_weight_output
+    cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT = args.loss_weight_hint
+    cfg.TRAIN.LOSS.HIDDEN_LOSS_WEIGHT = args.loss_weight_hidden
+    cfg.TRAIN.BATCH_SIZE = args.batch_size
+    cfg.TRAIN.MAX_EPOCHS = args.epochs
+    cfg.RUN_NAME = cfg.RUN_NAME+"-hints"
 
-    if args.hints:
-        cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT = 1.0
-        cfg.RUN_NAME = cfg.RUN_NAME+"-hints"
-        logger.info("Using hints.")
+    # update model configs 
+    cfg.MODEL.HIDDEN_DIM = args.hidden_dim
+    cfg.MODEL.MSG_PASSING_STEPS = args.gnn_layers
+    cfg.MODEL.GRU.ENABLE = args.enable_gru
 
     
     logger.info("Starting run...")
@@ -126,10 +131,37 @@ if __name__ == '__main__':
     specs = train_ds.specs
     
     # load model
-    datamodule = CLRSDataModule(train_dataset=train_ds,val_datasets=val_ds, test_datasets=test_ds, batch_size=cfg.TRAIN.BATCH_SIZE, num_workers=cfg.TRAIN.NUM_WORKERS, test_batch_size=cfg.TEST.BATCH_SIZE)
-    datamodule.val_dataloader()
-    print(train_ds.specs)
-    model = SALSACLRSModel(specs=train_ds.specs, cfg=cfg)
+    metrics = {}; rng = np.random.default_rng(args.seed)
+    for run in range(args.runs):
+        # set seed
+        run_seed = rng.integers(0, 10000)
+        pl.seed_everything(run_seed)
+        logger.info(f"Using seed {run_seed}")
 
-    ckpt_dir = "./saved/"
-    train(model, datamodule, cfg, train_ds.specs, seed = args.seed, checkpoint_dir=ckpt_dir, devices=args.devices)
+        datamodule = CLRSDataModule(train_dataset=train_ds, val_datasets=val_ds, test_datasets=test_ds, batch_size=cfg.TRAIN.BATCH_SIZE, num_workers=cfg.TRAIN.NUM_WORKERS, test_batch_size=cfg.TEST.BATCH_SIZE)
+        datamodule.val_dataloader()
+        print(train_ds.specs)
+        model = SALSACLRSModel(specs=train_ds.specs, cfg=cfg)
+
+        ckpt_dir = "./saved/"
+        results = train(model, datamodule, cfg, train_ds.specs, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, run_name=cfg.RUN_NAME + f"-run{run}")
+
+        for key in results:
+            if key not in metrics:
+                metrics[key] = []
+            metrics[key].append(results[key])
+    # Log results
+    for key in metrics:
+        logger.info("{}: {:.4f} +/- {:.4f}".format(key, np.mean(metrics[key]), np.std(metrics[key])))
+    
+    logger.info("Saving results...")
+    results_dir = f"results/{cfg.ALGORITHM}/{cfg.RUN_NAME}"
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir, exist_ok=True)
+
+    # write csv
+    metrics = {k: np.mean(v) for k, v in metrics.items()}
+    with open(os.path.join(results_dir, f"results.csv"), "w") as f:
+        writer = csv.DictWriter(f, metrics.keys())
+        writer.writeheader()
+        writer.writerow(metrics)

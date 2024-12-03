@@ -17,22 +17,23 @@ class EncodeProcessDecode(torch.nn.Module):
         self.cfg = cfg
         self.specs = specs
         self.has_randomness = 'randomness' in specs
-        self.processor = Processor(cfg, self.has_randomness)
+        self.processor = torch.nn.ModuleList()
+        for _ in range(self.cfg.MODEL.MSG_PASSING_STEPS):
+            self.processor.append(Processor(cfg, self.has_randomness))
         self.encoder = Encoder(specs, self.cfg.MODEL.HIDDEN_DIM)
 
         decoder_input = self.cfg.MODEL.HIDDEN_DIM*3 if self.cfg.MODEL.DECODER_USE_LAST_HIDDEN else self.cfg.MODEL.HIDDEN_DIM*2
         self.decoder = Decoder(specs, decoder_input, no_hint=self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT == 0.0)
         logger.debug(f"Decoder: {self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT == 0.0}")
 
-        if not self.processor.has_edge_weight() and not self.processor.has_edge_attr():
+        if not self.processor[0].has_edge_weight() and not self.processor[0].has_edge_attr():
             if "A" in specs:
                 logger.warning(f"Processor {self.cfg.MODEL.PROCESSOR.NAME} does neither support edge_weight nor edge_attr, but the algorithm requires edge weights.")
                 raise ValueError(f"Processor {self.cfg.MODEL.PROCESSOR.NAME} does neither support edge_weight nor edge_attr, but the algorithm requires edge weights.")
-        elif self.processor.has_edge_weight():
+        elif self.processor[0].has_edge_weight():
             self.edge_weight_name = "edge_weight"
-        elif self.processor.has_edge_attr():
+        elif self.processor[0].has_edge_attr():
             self.edge_weight_name = "edge_attr"
-
 
         if self.cfg.MODEL.GRU.ENABLE:
             self.gru = torch.nn.GRUCell(self.cfg.MODEL.HIDDEN_DIM, self.cfg.MODEL.HIDDEN_DIM)
@@ -57,9 +58,9 @@ class EncodeProcessDecode(torch.nn.Module):
             ''' last hidden is from the last algorithm step'''
             last_hidden = hidden
             ''' For each step, we apply the message passing steps '''
-            for _ in range(self.cfg.MODEL.MSG_PASSING_STEPS): 
+            for message_passing_step in range(self.cfg.MODEL.MSG_PASSING_STEPS): 
                 ''' Process: one GNN layer; hidden is updated very message passing step '''
-                hidden = self.processor(input_hidden, hidden, last_hidden, randomness=randomness[:, step] if randomness is not None else None, edge_index=batch.edge_index, batch_assignment=batch.batch, **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if hasattr(batch, 'weights') })
+                hidden = self.processor[message_passing_step](input_hidden, hidden, last_hidden, randomness=randomness[:, step] if randomness is not None else None, edge_index=batch.edge_index, batch_assignment=batch.batch, **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if hasattr(batch, 'weights') })
                 if self.cfg.MODEL.GRU.ENABLE:
                     hidden = self.gru(hidden, last_hidden)
             if self.training and self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT > 0.0:

@@ -1,10 +1,10 @@
-RUN_NAME: 'GIN'
-ALGORITHM: 'bfs'
+RUN_NAME: 'GINE'
 MODEL:
   DECODER_USE_LAST_HIDDEN: True
   PROCESSOR_USE_LAST_HIDDEN: True
+  MSG_PASSING_STEPS: 2
   PROCESSOR:
-    NAME: "GINConv"
+    NAME: "GINEConv"
     KWARGS: [{"layers":2, "train_eps":True, "dropout":0.0, "use_bn": True, "aggr": "max"}]
     LAYERNORM:
       ENABLE: True
@@ -36,4 +36,4 @@ TEST:
 
 LOGGING:
   WANDB:
-    GROUP: 'bfs'
+    GROUP: 'dijkstra'
