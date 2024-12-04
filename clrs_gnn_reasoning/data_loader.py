@@ -30,7 +30,7 @@ def pointer_to_one_hot(pointer, n):
     """Convert a pointer to a one-hot vector."""
     return (np.arange(n) == pointer.reshape(-1, 1)).astype(float)
 
-def to_data(inputs, hints, outputs, use_hints=True):
+def to_data(inputs, hints, outputs, use_hints=True, use_complete_graph=True):
     data_dict = {}
     input_attributes = []
     hint_attributes = []
@@ -39,36 +39,53 @@ def to_data(inputs, hints, outputs, use_hints=True):
     
     # first get the edge index; create a fully connected graph 
     input_keywords = [dp.name for dp in inputs]
-    if "adj" in input_keywords:
+    if "adj" in input_keywords and (not use_complete_graph):
         graph = nx.from_numpy_array(inputs[input_keywords.index("adj")].data[0])
     else:
-        graph = nx.complete_graph(data_dict['length'])
-    data_dict['edge_index'] = torch.tensor(np.array(list(graph.edges())).T, dtype=torch.long)
+        graph = nx.complete_graph(hints[0].data.shape[-1])
+    edge_list = np.array(list(graph.edges())).T
+    data_dict['edge_index'] = torch.tensor(np.concatenate([edge_list, edge_list[::-1]], axis=1), dtype=torch.long)
 
     # Parse inputs
     for dp in inputs:
-        if dp.name == "adj":
-            continue
-        elif dp.name == "A":
-            # add self loops
-            unique_values = np.unique(dp.data[0])
-            is_weighted = unique_values.size != 2 or not np.all(unique_values == np.array([0,1]))
-            if is_weighted:
-                data_dict["weights"] = infer_type("A", (dp.data[0] + np.eye(dp.data[0].shape[0]))[data_dict["edge_index"][0], data_dict["edge_index"][1]])
-        elif dp.location == clrs.Location.EDGE:
-            data_dict[dp.name] = infer_type(dp.type_, dp.data[0][data_dict["edge_index"][0], data_dict["edge_index"][1]])
-            input_attributes.append(dp.name)
-        elif dp.location == clrs.Location.NODE:
-            if dp.type_ == clrs.Type.POINTER:
-                # Convert pointers to one-hot edge masks
-                n = dp.data[0].shape[0]
-                pointer_matrix = pointer_to_one_hot(dp.data[0], n)
-                data_dict[dp.name] = pointer_matrix[data_dict["edge_index"][0], data_dict["edge_index"][1]]
-            else:
+        if not use_complete_graph:
+            if dp.name == "adj":
+                continue
+            elif dp.name == "A":
+                # add self loops
+                unique_values = np.unique(dp.data[0])
+                is_weighted = unique_values.size != 2 or not np.all(unique_values == np.array([0,1]))
+                if is_weighted:
+                    data_dict["weights"] = infer_type("A", (dp.data[0] + np.eye(dp.data[0].shape[0]))[data_dict["edge_index"][0], data_dict["edge_index"][1]])
+            elif dp.location == clrs.Location.EDGE:
+                data_dict[dp.name] = infer_type(dp.type_, dp.data[0][data_dict["edge_index"][0], data_dict["edge_index"][1]])
+                input_attributes.append(dp.name)
+            elif dp.location == clrs.Location.NODE:
+                if dp.type_ == clrs.Type.POINTER:
+                    # Convert pointers to one-hot edge masks
+                    n = dp.data[0].shape[0]
+                    pointer_matrix = pointer_to_one_hot(dp.data[0], n)
+                    data_dict[dp.name] = pointer_matrix[data_dict["edge_index"][0], data_dict["edge_index"][1]]
+                else:
+                    data_dict[dp.name] = infer_type(dp.type_, dp.data[0])
+                input_attributes.append(dp.name)
+            else: # Graph
                 data_dict[dp.name] = infer_type(dp.type_, dp.data[0])
-            input_attributes.append(dp.name)
-        else: # Graph
-            data_dict[dp.name] = infer_type(dp.type_, dp.data[0])
+        else:
+            if dp.location == clrs.Location.EDGE:
+                data_dict[dp.name] = infer_type(dp.type_, dp.data[0][data_dict["edge_index"][0], data_dict["edge_index"][1]])
+                input_attributes.append(dp.name)
+            elif dp.location == clrs.Location.NODE:
+                if dp.type_ == clrs.Type.POINTER:
+                    # Convert pointers to one-hot edge masks
+                    n = dp.data[0].shape[0]
+                    pointer_matrix = pointer_to_one_hot(dp.data[0], n)
+                    data_dict[dp.name] = pointer_matrix[data_dict["edge_index"][0], data_dict["edge_index"][1]]
+                else:
+                    data_dict[dp.name] = infer_type(dp.type_, dp.data[0])
+                input_attributes.append(dp.name)
+            else: # Graph
+                data_dict[dp.name] = infer_type(dp.type_, dp.data[0])
     # Parse outputs
     for dp in outputs:
         output_attributes.append(dp.name)
@@ -127,7 +144,8 @@ def to_data(inputs, hints, outputs, use_hints=True):
 
 class CLRSDataset(Dataset):
     def __init__(self, root="./data/CLRS/", algorithm="insertion_sort", split="train",
-                 num_samples = 1000, hints=True, ignore_all_hints=False, nickname=None, **kwargs):
+                 num_samples = 1000, hints=True, ignore_all_hints=False, nickname=None, use_complete_graph=False,
+                 **kwargs):
         """ Dataset for CLRS problems.
 
         Args:
@@ -156,6 +174,7 @@ class CLRSDataset(Dataset):
         self.hints = hints
         self.ignore_all_hints = ignore_all_hints
         self.nickname = nickname
+        self.use_complete_graph = use_complete_graph
         
         super().__init__(root, None, None, None)
         
@@ -179,7 +198,7 @@ class CLRSDataset(Dataset):
 
     @property
     def processed_dir(self) -> str:
-        return osp.join(self.root, f'processed_{self.split}', f"{self.algorithm}")
+        return osp.join(self.root, f'processed_{self.split}', f"{self.algorithm}" + ("_complete" if self.use_complete_graph else ""))
 
     def _update_specs(self):
         # get a batch
@@ -202,7 +221,7 @@ class CLRSDataset(Dataset):
         self.specs = specs
         
         root_dir = f"./data/CLRS/processed_{self.split}"
-        processed_dir = osp.join(root_dir, self.algorithm)
+        processed_dir = osp.join(root_dir, f"{self.algorithm}" + ("_complete" if self.use_complete_graph else ""))
         if not osp.exists(processed_dir):
             os.makedirs(processed_dir)
 
@@ -215,7 +234,7 @@ class CLRSDataset(Dataset):
             hints = features.hints
             lengths = features.lengths
             
-            data = to_data(inputs, hints, outputs)
+            data = to_data(inputs, hints, outputs, use_complete_graph = self.use_complete_graph)
             torch.save(data, osp.join(processed_dir, f'data_{i}.pt'))
 
     def len(self):

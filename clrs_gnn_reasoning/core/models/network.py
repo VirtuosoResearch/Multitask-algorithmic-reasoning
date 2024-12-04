@@ -40,7 +40,9 @@ class EncodeProcessDecode(torch.nn.Module):
         
     def process_weights(self, batch):
         if self.edge_weight_name == "edge_attr":
-            return batch.weights.unsqueeze(-1).type(torch.float32)
+            if batch.weights.dim() == 1:
+                return batch.weights.unsqueeze(-1).type(torch.float32)
+            return batch.weights.type(torch.float32)
         else:
             return batch.weights
         

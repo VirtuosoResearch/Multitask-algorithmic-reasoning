@@ -85,6 +85,7 @@ if __name__ == '__main__':
     parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
     # datasets
     parser.add_argument("--algorithm", type=str, required=True)
+    parser.add_argument("--use_complete_graph", action="store_true", help="Use complete graph")
     # training
     parser.add_argument("--optimizer", type=str, default="adamw", help="Optimizer")
     parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
@@ -119,15 +120,16 @@ if __name__ == '__main__':
     cfg.MODEL.HIDDEN_DIM = args.hidden_dim
     cfg.MODEL.MSG_PASSING_STEPS = args.gnn_layers
     cfg.MODEL.GRU.ENABLE = args.enable_gru
-
+    if args.use_complete_graph:
+        cfg.MODEL.PROCESSOR.KWARGS[0].update({"edge_dim": 128})
     
     logger.info("Starting run...")
     torch.set_float32_matmul_precision('medium')
 
     # load datasets
-    train_ds = CLRSDataset(algorithm=args.algorithm, split="train", num_samples=1000)
-    val_ds = CLRSDataset(algorithm=args.algorithm, split="val", num_samples=32)
-    test_ds = CLRSDataset(algorithm=args.algorithm, split="test", num_samples=32) 
+    train_ds = CLRSDataset(algorithm=args.algorithm, split="train", num_samples=1000, use_complete_graph=args.use_complete_graph)
+    val_ds = CLRSDataset(algorithm=args.algorithm, split="val", num_samples=32, use_complete_graph=args.use_complete_graph)
+    test_ds = CLRSDataset(algorithm=args.algorithm, split="test", num_samples=32, use_complete_graph=args.use_complete_graph) 
     specs = train_ds.specs
     
     # load model
@@ -140,7 +142,6 @@ if __name__ == '__main__':
 
         datamodule = CLRSDataModule(train_dataset=train_ds, val_datasets=val_ds, test_datasets=test_ds, batch_size=cfg.TRAIN.BATCH_SIZE, num_workers=cfg.TRAIN.NUM_WORKERS, test_batch_size=cfg.TEST.BATCH_SIZE)
         datamodule.val_dataloader()
-        print(train_ds.specs)
         model = SALSACLRSModel(specs=train_ds.specs, cfg=cfg)
 
         ckpt_dir = "./saved/"
