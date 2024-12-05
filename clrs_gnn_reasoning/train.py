@@ -131,6 +131,10 @@ if __name__ == '__main__':
     val_ds = CLRSDataset(algorithm=args.algorithm, split="val", num_samples=32, use_complete_graph=args.use_complete_graph)
     test_ds = CLRSDataset(algorithm=args.algorithm, split="test", num_samples=32, use_complete_graph=args.use_complete_graph) 
     specs = train_ds.specs
+    is_weighted = hasattr(train_ds[0], "weights")
+    if is_weighted and cfg.MODEL.PROCESSOR.NAME == "GINConv":
+        cfg.MODEL.PROCESSOR.NAME = "GINEConv"
+    print("Using processor", cfg.MODEL.PROCESSOR.NAME)
     
     # load model
     metrics = {}; rng = np.random.default_rng(args.seed)

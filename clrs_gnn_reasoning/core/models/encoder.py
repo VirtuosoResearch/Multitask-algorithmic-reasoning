@@ -89,6 +89,7 @@ class Encoder(nn.Module):
                 else:
                     hidden += encoding
 
-        batch.weights = edge_attr
+        if edge_attr is not None:
+            batch.weights = edge_attr
         randomness = batch.randomness if "randomness" in batch.inputs else None
         return hidden, randomness
