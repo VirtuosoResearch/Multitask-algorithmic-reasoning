@@ -1,0 +1,164 @@
+import os
+import sys
+from typing import Optional, Any, Dict
+from collections import defaultdict
+import csv
+
+import torch
+from loguru import logger
+import lightning.pytorch as pl
+import argparse
+import os
+import math
+
+from core.module import SALSACLRSModel
+from core.config import load_cfg
+from core.utils import NaNException
+from data_loader import CLRSData, CLRSDataset, CLRSDataModule
+import numpy as np
+
+from data_utils.multitask_data_loader import MultiCLRSDataModule
+from core.mtl_module import MultiCLRSModel
+
+logger.remove()
+logger.add(sys.stderr, level="INFO")
+
+import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+
+def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], algorithms=[], run_name=None):
+    callbacks = []
+    # checkpointing
+    if checkpoint_dir is not None:
+        ckpt_cbk = pl.callbacks.ModelCheckpoint(
+            dirpath=os.path.join("./checkpoints", "_".join(algorithms), run_name), 
+            monitor="val_node_accuracy", mode="max", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
+        callbacks.append(ckpt_cbk)
+
+    # early stopping
+    early_stop_cbk = pl.callbacks.EarlyStopping(monitor="val_node_accuracy", patience=cfg.TRAIN.EARLY_STOPPING_PATIENCE, mode="max", verbose=True)
+    callbacks.append(early_stop_cbk)
+
+    # Setup trainer
+    trainer = pl.Trainer(
+        devices=devices,
+        enable_checkpointing=True,
+        callbacks=[ckpt_cbk, early_stop_cbk],
+        max_epochs=cfg.TRAIN.MAX_EPOCHS,
+        logger=None,
+        accelerator="gpu",
+        log_every_n_steps=5,
+        gradient_clip_val=cfg.TRAIN.GRADIENT_CLIP_VAL,
+        reload_dataloaders_every_n_epochs=datamodule.reload_every_n_epochs,
+        precision= cfg.TRAIN.PRECISION,
+    )
+
+    # Train
+    if cfg.TRAIN.ENABLE:
+        try:
+            logger.info("Starting training...")
+            trainer.fit(model, datamodule=datamodule)
+        except NaNException:
+            logger.info(f"NaN detected, trying to recover from {ckpt_cbk.best_model_path}...")
+            try:
+                trainer.fit(model, datamodule=datamodule, ckpt_path=ckpt_cbk.best_model_path)
+            except NaNException:
+                logger.info("Recovery failed, stopping training...")
+
+    # Load best model
+    if cfg.TRAIN.LOAD_CHECKPOINT is None and cfg.TRAIN.ENABLE:
+        logger.info(f"Best model path: {ckpt_cbk.best_model_path}")
+        model = SALSACLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path)
+
+    # Test
+    logger.info("Testing best model...")
+    results = trainer.validate(model, datamodule=datamodule)[0]
+    test_results = trainer.test(model, datamodule=datamodule)[0]
+    results.update(test_results)
+    print(results)
+    return results
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cfg", type=str, required=True, help="Path to config file")
+    # datasets
+    parser.add_argument("--algorithms", type=str, nargs="+", default=["bfs"], help="Algorithms")
+    parser.add_argument("--use_complete_graph", action="store_true", help="Use complete graph")
+    # training
+    parser.add_argument("--optimizer", type=str, default="adamw", help="Optimizer")
+    parser.add_argument("--lr", type=float, default=5e-4, help="Learning rate")
+    parser.add_argument("--loss_weight_output", type=float, default=1.0, help="Output loss weight.")
+    parser.add_argument("--loss_weight_hint", type=float, default=1.0, help="Hint loss weight.")
+    parser.add_argument("--loss_weight_hidden", type=float, default=0.01, help="KL loss weight.")
+    parser.add_argument("--batch_size", type=int, default=32, help="Batch size")
+    parser.add_argument("--epochs", type=int, default=200, help="Number of epochs")
+    # model
+    parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension")
+    parser.add_argument("--gnn_layers", type=int, default=2, help="Message passing steps")
+    parser.add_argument("--enable_gru", action="store_true", help="Enable GRU")
+
+    parser.add_argument("--runs", type=int, default=1, help="Number of runs")
+    parser.add_argument("--devices", type=int, nargs="+", default=[0], help="Devices to use")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    args = parser.parse_args()
+
+    # load config
+    cfg = load_cfg(args.cfg)
+    cfg.TRAIN.OPTIMIZER.NAME = args.optimizer
+    cfg.TRAIN.OPTIMIZER.LR = args.lr
+    cfg.TRAIN.LOSS.OUTPUT_LOSS_WEIGHT = args.loss_weight_output
+    cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT = args.loss_weight_hint
+    cfg.TRAIN.LOSS.HIDDEN_LOSS_WEIGHT = args.loss_weight_hidden
+    cfg.TRAIN.BATCH_SIZE = args.batch_size
+    cfg.TRAIN.MAX_EPOCHS = args.epochs
+    cfg.RUN_NAME = cfg.RUN_NAME+"-hints"
+
+    # update model configs 
+    cfg.MODEL.HIDDEN_DIM = args.hidden_dim
+    cfg.MODEL.MSG_PASSING_STEPS = args.gnn_layers
+    cfg.MODEL.GRU.ENABLE = args.enable_gru
+    if args.use_complete_graph:
+        cfg.MODEL.PROCESSOR.KWARGS[0].update({"edge_dim": 128})
+    
+    logger.info("Starting run...")
+    torch.set_float32_matmul_precision('medium')
+
+    # load datasets
+    algorithm_str = "_".join(args.algorithms)
+    data_module = MultiCLRSDataModule(algorithms=args.algorithms, batch_size=cfg.TRAIN.BATCH_SIZE)
+    data_module.setup()
+    task_to_specs = data_module.task_to_specs
+    print("Using processor", cfg.MODEL.PROCESSOR.NAME)
+    
+    # load model
+    metrics = {}; rng = np.random.default_rng(args.seed)
+    for run in range(args.runs):
+        # set seed
+        run_seed = rng.integers(0, 10000)
+        pl.seed_everything(run_seed)
+        logger.info(f"Using seed {run_seed}")
+
+        model = MultiCLRSModel(task_to_specs, cfg=cfg)
+
+        ckpt_dir = "./saved/"
+        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithns, run_name=cfg.RUN_NAME + f"-run{run}")
+
+        for key in results:
+            if key not in metrics:
+                metrics[key] = []
+            metrics[key].append(results[key])
+    # Log results
+    for key in metrics:
+        logger.info("{}: {:.4f} +/- {:.4f}".format(key, np.mean(metrics[key]), np.std(metrics[key])))
+    
+    logger.info("Saving results...")
+    results_dir = f"results/{algorithm_str}/{cfg.RUN_NAME}"
+    if not os.path.exists(results_dir):
+        os.makedirs(results_dir, exist_ok=True)
+
+    # write csv
+    metrics = {k: np.mean(v) for k, v in metrics.items()}
+    with open(os.path.join(results_dir, f"results.csv"), "w") as f:
+        writer = csv.DictWriter(f, metrics.keys())
+        writer.writeheader()
+        writer.writerow(metrics)
