@@ -122,6 +122,7 @@ class GraphCategoricalDecoder(GraphBaseDecoder):
         return out
     
 
+# TODO: Edge pointer
 _DECODER_MAP = {
     ('node', 'scalar'): NodeScalarDecoder,
     ('node', 'mask'): NodeMaskDecoder,

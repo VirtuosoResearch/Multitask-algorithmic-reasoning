@@ -31,7 +31,7 @@ def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], alg
     # checkpointing
     if checkpoint_dir is not None:
         ckpt_cbk = pl.callbacks.ModelCheckpoint(
-            dirpath=os.path.join("./checkpoints", "_".join(algorithms), run_name), 
+            dirpath=os.path.join("./checkpoints", "_".join(algorithms)[:100], run_name), 
             monitor="val_node_accuracy", mode="max", filename=f'seed{seed}-{{epoch}}-{{step}}', save_top_k=1, verbose=True)
         callbacks.append(ckpt_cbk)
 
@@ -49,7 +49,7 @@ def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], alg
         accelerator="gpu",
         log_every_n_steps=5,
         gradient_clip_val=cfg.TRAIN.GRADIENT_CLIP_VAL,
-        reload_dataloaders_every_n_epochs=datamodule.reload_every_n_epochs,
+        # reload_dataloaders_every_n_epochs=datamodule.reload_every_n_epochs,
         precision= cfg.TRAIN.PRECISION,
     )
 
@@ -68,7 +68,7 @@ def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], alg
     # Load best model
     if cfg.TRAIN.LOAD_CHECKPOINT is None and cfg.TRAIN.ENABLE:
         logger.info(f"Best model path: {ckpt_cbk.best_model_path}")
-        model = SALSACLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path)
+        model = MultiCLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path, task_to_specs=datamodule.task_to_specs, cfg=cfg)
 
     # Test
     logger.info("Testing best model...")
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     torch.set_float32_matmul_precision('medium')
 
     # load datasets
-    algorithm_str = "_".join(args.algorithms)
+    algorithm_str = "_".join(args.algorithms)[:100]
     data_module = MultiCLRSDataModule(algorithms=args.algorithms, batch_size=cfg.TRAIN.BATCH_SIZE)
     data_module.setup()
     task_to_specs = data_module.task_to_specs
@@ -141,7 +141,7 @@ if __name__ == '__main__':
         model = MultiCLRSModel(task_to_specs, cfg=cfg)
 
         ckpt_dir = "./saved/"
-        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithns, run_name=cfg.RUN_NAME + f"-run{run}")
+        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
 
         for key in results:
             if key not in metrics:

@@ -39,6 +39,7 @@ _ENCODER_MAP = {
     ('edge', 'mask'): EdgeBaseEncoder,
     ('edge', 'mask_one'): EdgeBaseEncoder
 }
+# TODO: Edge pointer
 
 
 class Encoder(nn.Module):

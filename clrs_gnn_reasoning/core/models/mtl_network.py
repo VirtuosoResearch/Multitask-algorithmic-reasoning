@@ -54,7 +54,7 @@ class MultitaskEncodeProcessDecode(torch.nn.Module):
         
     def forward(self, batch):
         ''' Encoder: just encoding node features '''
-        task_name, batch = batch['task_name'], batch['batch']
+        task_name, batch = batch['task_name'], batch['data']
         input_hidden, randomness = self.encoders[task_name](batch)
         max_len = batch.length.max().item()
         hints = []
