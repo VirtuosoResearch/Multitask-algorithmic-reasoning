@@ -66,10 +66,10 @@ class BaseEdgeDecoder(nn.Module):
         self.source_lin = nn.Linear(hidden_dim, hidden_dim)
         self.target_lin = nn.Linear(hidden_dim, hidden_dim)
 
-    def forward(self, hiddens, edge_index):
+    def forward(self, hiddens, edge_index, **kwargs):
         zs = self.source_lin(hiddens) # N x H
         zt = self.target_lin(hiddens) # N x H
-        return (zs[edge_index[0]] * zt[edge_index[1]]).sum(dim=-1)
+        return (zs[edge_index[0]] * zt[edge_index[1]]).sum(dim=-1) # E x 1
     
 class EdgeMaskDecoder(BaseEdgeDecoder):
     def __init__(self, input_dim, hidden_dim=128):
@@ -82,6 +82,17 @@ class EdgeMaskDecoder(BaseEdgeDecoder):
 class NodePointerDecoder(BaseEdgeDecoder):
     def __init__(self, input_dim, hidden_dim=128):
         super().__init__(input_dim, hidden_dim)
+
+    def forward(self, hiddens, edge_index, **kwargs):
+        z =  super().forward(hiddens, edge_index) # E
+        # per node outgoing softmax
+        z = torch_scatter.scatter_log_softmax(z, edge_index[0], dim=0)
+        return z
+
+class EdgePointerDecoder(BaseEdgeDecoder):
+    ''' The same as the NodePointerDecoder '''
+    def __init__(self, input_dim, hidden_dim=128):
+        super(EdgePointerDecoder, self).__init__(input_dim, hidden_dim)
 
     def forward(self, hiddens, edge_index, **kwargs):
         z =  super().forward(hiddens, edge_index) # E
@@ -122,7 +133,6 @@ class GraphCategoricalDecoder(GraphBaseDecoder):
         return out
     
 
-# TODO: Edge pointer
 _DECODER_MAP = {
     ('node', 'scalar'): NodeScalarDecoder,
     ('node', 'mask'): NodeMaskDecoder,
@@ -131,6 +141,7 @@ _DECODER_MAP = {
     ('node', 'categorical'): NodeCategoricalDecoder,
     ('edge', 'mask'): EdgeMaskDecoder,
     ('edge', 'scalar'): BaseEdgeDecoder,
+    ('edge', 'pointer'): EdgePointerDecoder,
     ('graph', 'scalar'): GraphBaseDecoder,  
     ('graph', 'mask'): GraphMaskDecoder,
     ('graph', 'categorical'): GraphCategoricalDecoder,
@@ -167,7 +178,6 @@ class Decoder(nn.Module):
                 dkey = key.replace('_h', '')
             else:
                 dkey = key
-
             output[key] = self.decoder[dkey](hidden, edge_index=batch.edge_index, batch_assignment=batch.batch)
         return output
 

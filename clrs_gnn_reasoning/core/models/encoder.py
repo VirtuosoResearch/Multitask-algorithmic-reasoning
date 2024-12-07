@@ -30,17 +30,28 @@ class EdgeBaseEncoder(nn.Module):
             x = x.unsqueeze(-1)
         x = self.lin(x)
         return x
+    
+class EdgeMaskEncoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim=128):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.input_dim = input_dim
+        self.lin = nn.Parameter(torch.randn(2, hidden_dim))
+
+    def forward(self, x):
+        if x.dim() == 1:
+            x = x.unsqueeze(-1)
+        x = self.lin[x]
+        return x
 
 _ENCODER_MAP = {
     ('node', 'scalar'): NodeBaseEncoder,
     ('node', 'mask'): NodeBaseEncoder,
     ('node', 'mask_one'): NodeBaseEncoder,
     ('edge', 'scalar'): EdgeBaseEncoder,
-    ('edge', 'mask'): EdgeBaseEncoder,
-    ('edge', 'mask_one'): EdgeBaseEncoder
+    ('edge', 'mask'): EdgeMaskEncoder,
+    ('edge', 'mask_one'): EdgeMaskEncoder
 }
-# TODO: Edge pointer
-
 
 class Encoder(nn.Module):
     def __init__(self, specs, hidden_dim=128):
@@ -52,7 +63,9 @@ class Encoder(nn.Module):
             if k == "randomness": # randomness is not encoded
                 continue
             stage, loc, type_, cat_dim = v
-            if loc == 'edge':
+            if type_ == 'pointer':
+                continue
+            elif loc == 'edge':
                 # logger.debug(f'Ignoring edge encoder for {k}')
                 # continue
                 self.encoder[k] = _ENCODER_MAP[(loc, type_)](1, hidden_dim)
@@ -73,6 +86,8 @@ class Encoder(nn.Module):
             if key == "randomness":
                 continue
             logger.debug(f"Encoding {key}")
+            if type_ == 'pointer':
+                continue
             if loc == 'edge':
                 encoding = self.encoder[key](batch[key].reshape(-1))
                 if edge_attr is None:

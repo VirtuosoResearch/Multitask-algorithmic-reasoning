@@ -51,8 +51,8 @@ class SALSACLRSModel(pl.LightningModule):
         loss, outloss, hintloss, hiddenloss = self._loss(batch, output, hints, hidden)
         self.current_loader_idx = dataloader_idx
         # calc batch metrics
-        assert len(batch.outputs) == 1
-        metrics = calc_metrics(batch.outputs[0], output, batch, self.specs[batch.outputs[0]][2])
+        # assert len(batch.outputs) == 1
+        metrics = calc_metrics(batch.outputs[0], output, batch, self.specs[batch.outputs[0]][2], loc=self.specs[batch.outputs[0]][1])
         output.update({f"{m}_metric": metrics[m] for m in metrics})
         output["batch_size"] = torch.tensor(batch.num_graphs).float()
         output["num_nodes"] = torch.tensor(batch.num_nodes).float()
