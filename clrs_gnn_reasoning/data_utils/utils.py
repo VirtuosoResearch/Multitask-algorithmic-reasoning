@@ -40,11 +40,11 @@ def to_data(inputs, hints, outputs, use_hints=True, use_complete_graph=True):
     # first get the edge index; create a fully connected graph 
     input_keywords = [dp.name for dp in inputs]
     if "adj" in input_keywords and (not use_complete_graph):
-        graph = nx.from_numpy_array(inputs[input_keywords.index("adj")].data[0])
+        graph = nx.from_numpy_array(inputs[input_keywords.index("adj")].data[0], create_using=nx.DiGraph())
     else:
-        graph = nx.complete_graph(hints[0].data.shape[-1])
+        graph = nx.complete_graph(hints[0].data.shape[-1], create_using=nx.DiGraph())
     edge_list = np.array(list(graph.edges())).T
-    data_dict['edge_index'] = torch.tensor(np.concatenate([edge_list, edge_list[::-1]], axis=1), dtype=torch.long)
+    data_dict['edge_index'] = torch.tensor(edge_list, dtype=torch.long) # np.concatenate([edge_list, edge_list[::-1]], axis=1)
 
     # Parse inputs
     for dp in inputs:

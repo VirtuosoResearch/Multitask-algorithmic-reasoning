@@ -14,7 +14,7 @@ import math
 from core.module import SALSACLRSModel
 from core.config import load_cfg
 from core.utils import NaNException
-from data_loader import CLRSData, CLRSDataset, CLRSDataModule
+from data_utils.data_loader import CLRSData, CLRSDataset, CLRSDataModule
 import numpy as np
 
 logger.remove()
@@ -22,6 +22,14 @@ logger.add(sys.stderr, level="INFO")
 
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
+
+''' 
+TODO:
+- Why the NodePointerDecoder is defined on the edges 
+- Why the Depth first search has no input of the source nodes: 's_prev': ('hint', 'node', 'pointer'), 's': ('hint', 'node', 'mask_one'), 'u': ('hint', 'node', 'mask_one'), 'v': ('hint', 'node', 'mask_one'), 's_last': ('hint', 'node', 'mask_one')}
+- Calculate loss on multiple outputs
+'''
+
 
 def train(model, datamodule, cfg, specs, seed=42, checkpoint_dir=None, devices=[0], run_name=None):
     callbacks = []

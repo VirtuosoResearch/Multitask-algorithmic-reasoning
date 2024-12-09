@@ -172,9 +172,17 @@ def _gine_module(in_channels, out_channels, eps=0, train_eps=False, layers=2, dr
     
     return pyg_nn.GINEConv(mlp, eps, train_eps, edge_dim=edge_dim, aggr=aggr)
 
+def _gcn_module(in_channels, out_channels, **kwargs):
+    return pyg_nn.GCNConv(in_channels, out_channels)
+
+def _sage_module(in_channels, out_channels, aggr = "max", **kwargs):
+    return pyg_nn.SAGEConv(in_channels, out_channels, aggr=aggr, **kwargs)
+
 def _get_processor(name):
     if name == "GCNConv":
-        return pyg_nn.GCNConv
+        return _gcn_module
+    elif name == "SAGEConv":
+        return _sage_module
     elif name == "GINConv":
         return _gin_module    
     elif name == "GINEConv":
