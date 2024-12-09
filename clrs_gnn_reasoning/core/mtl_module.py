@@ -50,7 +50,7 @@ class MultiCLRSModel(pl.LightningModule):
         # calc batch metrics
         task_name = batch["task_name"]; batch = batch["data"]
         # assert len(batch.outputs) == 1
-        metrics = calc_metrics(batch.outputs[0], output, batch, self.task_to_specs[task_name][batch.outputs[0]][2], loc=self.specs[batch.outputs[0]][1])
+        metrics = calc_metrics(batch.outputs[0], output, batch, self.task_to_specs[task_name][batch.outputs[0]][2], loc=self.task_to_specs[task_name][batch.outputs[0]][1])
         output.update({f"{m}_metric": metrics[m] for m in metrics})
         output["batch_size"] = torch.tensor(batch.num_graphs).float()
         output["num_nodes"] = torch.tensor(batch.num_nodes).float()
