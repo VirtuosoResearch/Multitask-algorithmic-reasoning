@@ -14,7 +14,7 @@ import math
 from core.module import SALSACLRSModel
 from core.config import load_cfg
 from core.utils import NaNException
-from data_loader import CLRSData, CLRSDataset, CLRSDataModule
+from data_utils.data_loader import CLRSData, CLRSDataset, CLRSDataModule
 import numpy as np
 
 from data_utils.multitask_data_loader import MultiCLRSDataModule
@@ -100,6 +100,11 @@ if __name__ == '__main__':
     parser.add_argument("--runs", type=int, default=1, help="Number of runs")
     parser.add_argument("--devices", type=int, nargs="+", default=[0], help="Devices to use")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+
+    parser.add_argument("--train_mmoe", action="store_true", help="Train MMoE model")
+    parser.add_argument("--num_experts", type=int, default=4, help="Number of experts")
+
+    parser.add_argument("--save_name", type=str, default="none")
     args = parser.parse_args()
 
     # load config
@@ -138,7 +143,7 @@ if __name__ == '__main__':
         pl.seed_everything(run_seed)
         logger.info(f"Using seed {run_seed}")
 
-        model = MultiCLRSModel(task_to_specs, cfg=cfg)
+        model = MultiCLRSModel(task_to_specs, cfg=cfg, train_mmoe=args.train_mmoe, num_experts=args.num_experts)
 
         ckpt_dir = "./saved/"
         results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
@@ -152,7 +157,7 @@ if __name__ == '__main__':
         logger.info("{}: {:.4f} +/- {:.4f}".format(key, np.mean(metrics[key]), np.std(metrics[key])))
     
     logger.info("Saving results...")
-    results_dir = f"results/{algorithm_str}/{cfg.RUN_NAME}"
+    results_dir = f"results/{algorithm_str}/{cfg.RUN_NAME}_{args.save_name}"
     if not os.path.exists(results_dir):
         os.makedirs(results_dir, exist_ok=True)
 

@@ -6,7 +6,7 @@ from collections import defaultdict
 from loguru import logger
 from sklearn.metrics import f1_score
 
-from .models import EncodeProcessDecode, MultitaskEncodeProcessDecode
+from .models import EncodeProcessDecode, MultitaskEncodeProcessDecode, MMOE_EncodeProcessDecode
 from .loss import CLRSLoss
 from .utils import stack_dicts
 from .metrics import calc_metrics
@@ -17,11 +17,12 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 import numpy as np
 
 class MultiCLRSModel(pl.LightningModule):
-    def __init__(self, task_to_specs, cfg):
+    def __init__(self, task_to_specs, cfg, train_mmoe=False, num_experts=4):
         super().__init__()
         self.cfg = cfg
         self.task_to_specs = task_to_specs
-        self.model = MultitaskEncodeProcessDecode(task_to_specs, cfg)
+        self.model = MultitaskEncodeProcessDecode(task_to_specs, cfg) if not train_mmoe else \
+            MMOE_EncodeProcessDecode(task_to_specs, cfg, num_experts)
         self.task_to_losses = {task_name: CLRSLoss(specs, cfg.TRAIN.LOSS.HIDDEN_LOSS_TYPE) for task_name, specs in task_to_specs.items()}
         self.step_output_cache = defaultdict(list)
 
