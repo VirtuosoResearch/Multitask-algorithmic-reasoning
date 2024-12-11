@@ -97,8 +97,9 @@ class MultiCLRSModel(pl.LightningModule):
                 self.log(f"val_{task_name}_{key}", metrics[key])
                 summary[f"val_{task_name}_{key}"].append(metrics[key])
         for key in ["node_accuracy", "graph_accuracy", "graph_f1"]:
-            summary[key] = np.mean([v for k, v in summary.items() if key in k])
-            self.log(f"val_{key}", summary[key])
+            summary[key] = np.concatenate([v for k, v in summary.items() if key in k])
+            for val in summary[key]:
+                self.log(f"val_{key}", val)
 
         for key in summary:
             summary[key] = np.mean(summary[key])
@@ -112,10 +113,11 @@ class MultiCLRSModel(pl.LightningModule):
             metrics = self._end_of_epoch_metrics(task_name)
             for key in metrics:
                 self.log(f"test_{task_name}_{key}", metrics[key])
-        summary[f"val_{task_name}_{key}"].append(metrics[key])
+        summary[f"test_{task_name}_{key}"].append(metrics[key])
         for key in ["node_accuracy", "graph_accuracy", "graph_f1"]:
-            summary[key] = np.mean([v for k, v in summary.items() if key in k])
-            self.log(f"val_{key}", summary[key])
+            summary[key] = np.concatenate([v for k, v in summary.items() if key in k])
+            for val in summary[key]:
+                self.log(f"test_{key}", val)
 
         for key in summary:
             summary[key] = np.mean(summary[key])

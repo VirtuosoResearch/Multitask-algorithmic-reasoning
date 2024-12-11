@@ -62,7 +62,8 @@ class EncodeProcessDecode(torch.nn.Module):
             ''' For each step, we apply the message passing steps '''
             for message_passing_step in range(self.cfg.MODEL.MSG_PASSING_STEPS): 
                 ''' Process: one GNN layer; hidden is updated very message passing step '''
-                hidden = self.processor[message_passing_step](input_hidden, hidden, last_hidden, randomness=randomness[:, step] if randomness is not None else None, edge_index=batch.edge_index, batch_assignment=batch.batch, **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if hasattr(batch, 'weights') })
+                hidden = self.processor[message_passing_step](input_hidden, hidden, last_hidden, randomness=randomness[:, step] if randomness is not None else None, edge_index=batch.edge_index, batch_assignment=batch.batch, 
+                                                              **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if (hasattr(batch, 'weights') and hasattr(self, "edge_weight_name")) })
                 if self.cfg.MODEL.GRU.ENABLE:
                     hidden = self.gru(hidden, last_hidden)
             if self.training and self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT > 0.0:
