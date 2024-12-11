@@ -113,7 +113,7 @@ class MultiCLRSModel(pl.LightningModule):
             metrics = self._end_of_epoch_metrics(task_name)
             for key in metrics:
                 self.log(f"test_{task_name}_{key}", metrics[key])
-        summary[f"test_{task_name}_{key}"].append(metrics[key])
+                summary[f"test_{task_name}_{key}"].append(metrics[key])
         for key in ["node_accuracy", "graph_accuracy", "graph_f1"]:
             summary[key] = np.concatenate([v for k, v in summary.items() if key in k])
             for val in summary[key]:

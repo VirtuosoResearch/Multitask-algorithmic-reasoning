@@ -51,7 +51,7 @@ class MMOE_Processor(torch.nn.Module, ABC):
             out = self.experts[i](stacked, **kwargs)
             if self.cfg.MODEL.PROCESSOR.LAYERNORM.ENABLE:
                 # norm
-                out = self.norm(out, batch=batch_assignment)
+                out = self.norms[i](out, batch=batch_assignment)
             expert_outs.append(out)
         expert_outs = torch.stack(expert_outs, dim=1) # [Batch, Experts, Dim]
         
