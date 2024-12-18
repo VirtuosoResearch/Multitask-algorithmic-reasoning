@@ -15,6 +15,7 @@ from core.module import SALSACLRSModel
 from core.config import load_cfg
 from core.utils import NaNException
 from data_utils.data_loader import CLRSData, CLRSDataset, CLRSDataModule
+from core.models import EncodeProcessDecode, MultitaskEncodeProcessDecode, MMOE_EncodeProcessDecode, BranchedMTL_EncodeProcessDecode
 import numpy as np
 
 from data_utils.multitask_data_loader import MultiCLRSDataModule
@@ -26,7 +27,7 @@ logger.add(sys.stderr, level="INFO")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-def train(model, datamodule, cfg, args, seed=42, checkpoint_dir=None, devices=[0], algorithms=[], run_name=None):
+def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], algorithms=[], run_name=None):
     callbacks = []
     # checkpointing
     if checkpoint_dir is not None:
@@ -68,7 +69,9 @@ def train(model, datamodule, cfg, args, seed=42, checkpoint_dir=None, devices=[0
     # Load best model
     if cfg.TRAIN.LOAD_CHECKPOINT is None and cfg.TRAIN.ENABLE:
         logger.info(f"Best model path: {ckpt_cbk.best_model_path}")
-        model = MultiCLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path, task_to_specs=datamodule.task_to_specs, cfg=cfg, train_mmoe=args.train_mmoe, num_experts=args.num_experts)
+        mtl_model = model.model
+        model = MultiCLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path, 
+                                                    task_to_specs=datamodule.task_to_specs, cfg=cfg, model=mtl_model)
 
     # Test
     logger.info("Testing best model...")
@@ -103,6 +106,8 @@ if __name__ == '__main__':
 
     parser.add_argument("--train_mmoe", action="store_true", help="Train MMoE model")
     parser.add_argument("--num_experts", type=int, default=4, help="Number of experts")
+
+    parser.add_argument("--train_branched_network", action="store_true", help="Train branched network")
 
     parser.add_argument("--save_name", type=str, default="none")
     args = parser.parse_args()
@@ -142,11 +147,17 @@ if __name__ == '__main__':
         run_seed = rng.integers(0, 10000)
         pl.seed_everything(run_seed)
         logger.info(f"Using seed {run_seed}")
-
-        model = MultiCLRSModel(task_to_specs, cfg=cfg, train_mmoe=args.train_mmoe, num_experts=args.num_experts)
+        
+        if args.train_mmoe:
+            mtl_model = MMOE_EncodeProcessDecode(task_to_specs, cfg, args.num_experts)
+        elif args.train_branched_network:
+            mtl_model = BranchedMTL_EncodeProcessDecode(task_to_specs, cfg)
+        else:
+            mtl_model = MultitaskEncodeProcessDecode(task_to_specs, cfg)
+        model = MultiCLRSModel(task_to_specs, cfg=cfg, model=mtl_model)
 
         ckpt_dir = "./saved/"
-        results = train(model, data_module, cfg, args, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
+        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
 
         for key in results:
             if key not in metrics:
