@@ -108,6 +108,7 @@ if __name__ == '__main__':
     parser.add_argument("--num_experts", type=int, default=4, help="Number of experts")
 
     parser.add_argument("--train_branched_network", action="store_true", help="Train branched network")
+    parser.add_argument("--tree_config_dir", type=str, default=None, help="Tree config directory")
 
     parser.add_argument("--save_name", type=str, default="none")
     args = parser.parse_args()
@@ -152,6 +153,15 @@ if __name__ == '__main__':
             mtl_model = MMOE_EncodeProcessDecode(task_to_specs, cfg, args.num_experts)
         elif args.train_branched_network:
             mtl_model = BranchedMTL_EncodeProcessDecode(task_to_specs, cfg)
+            if args.tree_config_dir is not None:
+                tree_config_dir = os.path.join("tree_configs", args.tree_config_dir)
+                with open(tree_config_dir, "r") as f:
+                    for line in f.readlines():
+                        layer, tasks = line.split(":")
+                        tasks = tasks.strip().split(" ")
+                        layer = int(layer)
+                        mtl_model.branch_layers(layer, tasks)
+            print(mtl_model)
         else:
             mtl_model = MultitaskEncodeProcessDecode(task_to_specs, cfg)
         model = MultiCLRSModel(task_to_specs, cfg=cfg, model=mtl_model)
