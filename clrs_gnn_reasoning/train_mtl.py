@@ -26,7 +26,7 @@ logger.add(sys.stderr, level="INFO")
 import warnings
 warnings.simplefilter(action='ignore', category=FutureWarning)
 
-def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], algorithms=[], run_name=None):
+def train(model, datamodule, cfg, args, seed=42, checkpoint_dir=None, devices=[0], algorithms=[], run_name=None):
     callbacks = []
     # checkpointing
     if checkpoint_dir is not None:
@@ -68,7 +68,7 @@ def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], alg
     # Load best model
     if cfg.TRAIN.LOAD_CHECKPOINT is None and cfg.TRAIN.ENABLE:
         logger.info(f"Best model path: {ckpt_cbk.best_model_path}")
-        model = MultiCLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path, task_to_specs=datamodule.task_to_specs, cfg=cfg)
+        model = MultiCLRSModel.load_from_checkpoint(ckpt_cbk.best_model_path, task_to_specs=datamodule.task_to_specs, cfg=cfg, train_mmoe=args.train_mmoe, num_experts=args.num_experts)
 
     # Test
     logger.info("Testing best model...")
@@ -146,7 +146,7 @@ if __name__ == '__main__':
         model = MultiCLRSModel(task_to_specs, cfg=cfg, train_mmoe=args.train_mmoe, num_experts=args.num_experts)
 
         ckpt_dir = "./saved/"
-        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
+        results = train(model, data_module, cfg, args, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
 
         for key in results:
             if key not in metrics:
