@@ -162,6 +162,8 @@ if __name__ == '__main__':
                         layer = int(layer)
                         mtl_model.branch_layers(layer, tasks)
             print(mtl_model)
+            for i in range(len(mtl_model.task_to_processor_indexes)):
+                print(mtl_model.task_to_processor_indexes[i])
         else:
             mtl_model = MultitaskEncodeProcessDecode(task_to_specs, cfg)
         model = MultiCLRSModel(task_to_specs, cfg=cfg, model=mtl_model)
