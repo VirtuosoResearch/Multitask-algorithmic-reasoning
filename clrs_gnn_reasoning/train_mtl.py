@@ -66,6 +66,13 @@ def train(model, datamodule, cfg, seed=42, checkpoint_dir=None, devices=[0], alg
             except NaNException:
                 logger.info("Recovery failed, stopping training...")
 
+    # save the checkpoint as a .pt file
+    from lightning_fabric.utilities.cloud_io import _load as pl_load
+    checkpoint = pl_load(ckpt_cbk.best_model_path, map_location=model.device)
+    state_dict = checkpoint["state_dict"]
+    state_dict = {k[6:]: v for k, v in state_dict.items()}
+    torch.save(state_dict, ckpt_cbk.best_model_path.replace(".ckpt", ".pt"))
+
     # Load best model
     if cfg.TRAIN.LOAD_CHECKPOINT is None and cfg.TRAIN.ENABLE:
         logger.info(f"Best model path: {ckpt_cbk.best_model_path}")
@@ -109,6 +116,10 @@ if __name__ == '__main__':
 
     parser.add_argument("--train_branched_network", action="store_true", help="Train branched network")
     parser.add_argument("--tree_config_dir", type=str, default=None, help="Tree config directory")
+
+    # checkpointing 
+    parser.add_argument("--load_checkpoint_dir", type=str, default=None, help="Load checkpoint")
+    parser.add_argument("--load_layer", type=int, default=0, help="Load layer")
 
     parser.add_argument("--save_name", type=str, default="none")
     args = parser.parse_args()
@@ -168,8 +179,23 @@ if __name__ == '__main__':
             mtl_model = MultitaskEncodeProcessDecode(task_to_specs, cfg)
         model = MultiCLRSModel(task_to_specs, cfg=cfg, model=mtl_model)
 
+        if args.load_checkpoint_dir is not None and os.path.exists(os.path.join("./checkpoints", args.load_checkpoint_dir)):
+            state_dict = torch.load(os.path.join("./checkpoints", args.load_checkpoint_dir), map_location=model.device)
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith("processor"):
+                    layer = int(k.split(".")[1])
+                    if layer >= args.load_layer:
+                        new_state_dict[k] = v
+                else:
+                    new_state_dict[k] = v
+            for k in new_state_dict.keys():
+                if "processor" in k: print(k)
+            mtl_model.load_state_dict(new_state_dict, strict=False)
+
         ckpt_dir = "./saved/"
-        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms, run_name=cfg.RUN_NAME + f"-run{run}")
+        results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms,
+                        run_name=cfg.RUN_NAME + f"-run{run}" + (f"-{args.save_name}" if args.save_name != "none" else ""))
 
         for key in results:
             if key not in metrics:

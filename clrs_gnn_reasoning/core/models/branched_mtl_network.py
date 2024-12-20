@@ -50,9 +50,7 @@ class BranchedMTL_EncodeProcessDecode(torch.nn.Module):
             self.edge_weight_name = "edge_attr"
 
         if self.cfg.MODEL.GRU.ENABLE:
-            self.gru = torch.nn.ModuleDict()
-            for task in self.tasks:
-                self.gru[task] = torch.nn.GRUCell(self.cfg.MODEL.HIDDEN_DIM, self.cfg.MODEL.HIDDEN_DIM)
+            self.gru = torch.nn.GRUCell(self.cfg.MODEL.HIDDEN_DIM, self.cfg.MODEL.HIDDEN_DIM)
     
     def branch_layers(self, layer_index, task_subset):
         ''' Create a new branch for the given tasks at a layer'''
@@ -93,7 +91,7 @@ class BranchedMTL_EncodeProcessDecode(torch.nn.Module):
                 hidden = self.processor[message_passing_step][layer_processor_index](input_hidden, hidden, last_hidden, randomness=randomness[:, step] if randomness is not None else None, edge_index=batch.edge_index, batch_assignment=batch.batch, 
                                                               **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if (hasattr(batch, 'weights') and hasattr(self, "edge_weight_name")) })
                 if self.cfg.MODEL.GRU.ENABLE:
-                    hidden = self.gru[task_name](hidden, last_hidden)
+                    hidden = self.gru(hidden, last_hidden)
             if self.training and self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT > 0.0:
                 ''' Decoder: just decoding node features to corresponding types '''
                 ''' Decode for every algorithmic step '''
