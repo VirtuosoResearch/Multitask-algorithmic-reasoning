@@ -181,17 +181,18 @@ if __name__ == '__main__':
 
         if args.load_checkpoint_dir is not None and os.path.exists(os.path.join("./checkpoints", args.load_checkpoint_dir)):
             state_dict = torch.load(os.path.join("./checkpoints", args.load_checkpoint_dir), map_location=model.device)
-            new_state_dict = {}
-            for k, v in state_dict.items():
-                if k.startswith("processor"):
-                    layer = int(k.split(".")[1])
+
+            mtl_model.load_state_dict(state_dict, strict=False)
+            for name, param in mtl_model.named_parameters():
+                if name.startswith("processor"):
+                    layer = int(name.split(".")[1])
                     if layer >= args.load_layer:
-                        new_state_dict[k] = v
-                else:
-                    new_state_dict[k] = v
-            for k in new_state_dict.keys():
-                if "processor" in k: print(k)
-            mtl_model.load_state_dict(new_state_dict, strict=False)
+                        param.requires_grad = True
+                    else:
+                        param.requires_grad = False 
+
+        for name, param in mtl_model.named_parameters():
+            print(name, param.requires_grad)
 
         ckpt_dir = "./saved/"
         results = train(model, data_module, cfg, seed = run_seed, checkpoint_dir=ckpt_dir, devices=args.devices, algorithms=args.algorithms,
