@@ -116,10 +116,14 @@ if __name__ == '__main__':
 
     parser.add_argument("--train_branched_network", action="store_true", help="Train branched network")
     parser.add_argument("--tree_config_dir", type=str, default=None, help="Tree config directory")
+    parser.add_argument("--branch_layer", type=int, default=-1, help="Branch layer") # only used for pairwise tasks
 
     # checkpointing 
     parser.add_argument("--load_checkpoint_dir", type=str, default=None, help="Load checkpoint")
-    parser.add_argument("--load_layer", type=int, default=0, help="Load layer")
+    parser.add_argument("--train_layer", type=int, default=0, help="Load layer")
+    # load specific layers
+    parser.add_argument("--load_layer_checkpoint_dirs", type=str, nargs="+", default=None, help="Load layer checkpoint directories")
+    parser.add_argument("--load_layers", type=int, nargs="+", default=None, help="Load layers")
 
     parser.add_argument("--save_name", type=str, default="none")
     args = parser.parse_args()
@@ -172,6 +176,8 @@ if __name__ == '__main__':
                         tasks = tasks.strip().split(" ")
                         layer = int(layer)
                         mtl_model.branch_layers(layer, tasks)
+            elif len(args.algorithms) == 2 and args.branch_layer != -1:
+                mtl_model.branch_layers(args.branch_layer, args.algorithms[1])
             print(mtl_model)
             for i in range(len(mtl_model.task_to_processor_indexes)):
                 print(mtl_model.task_to_processor_indexes[i])
@@ -183,10 +189,24 @@ if __name__ == '__main__':
             state_dict = torch.load(os.path.join("./checkpoints", args.load_checkpoint_dir), map_location=model.device)
 
             mtl_model.load_state_dict(state_dict, strict=False)
+
+            def filter_layer(state_dict, layer):
+                new_state_dict = {}
+                for key in state_dict:
+                    if key.startswith(f"processor.{layer}."):
+                        new_state_dict[key] = state_dict[key]
+                return new_state_dict
+
+            if args.load_layer_checkpoint_dirs is not None:
+                for checkpoint_dir, layer in zip(args.load_layer_checkpoint_dirs, args.load_layers):
+                    tmp_state_dict = torch.load(os.path.join("./checkpoints", checkpoint_dir), map_location=model.device)
+                    tmp_state_dict = filter_layer(tmp_state_dict, layer)
+                    mtl_model.load_state_dict(tmp_state_dict, strict=False)
+
             for name, param in mtl_model.named_parameters():
                 if name.startswith("processor"):
                     layer = int(name.split(".")[1])
-                    if layer >= args.load_layer:
+                    if layer >= args.train_layer:
                         param.requires_grad = True
                     else:
                         param.requires_grad = False 
