@@ -102,7 +102,12 @@ class MMOE_EncodeProcessDecode(torch.nn.Module):
             self.edge_weight_name = "edge_attr"
 
         if self.cfg.MODEL.GRU.ENABLE:
-            self.gru = torch.nn.GRUCell(self.cfg.MODEL.HIDDEN_DIM, self.cfg.MODEL.HIDDEN_DIM)
+            if self.cfg.MODEL.GRU.TASK_WISE:
+                self.gru = torch.nn.ModuleDict()
+                for task in task_to_specs.keys():
+                    self.gru[task] = torch.nn.GRUCell(self.cfg.MODEL.HIDDEN_DIM, self.cfg.MODEL.HIDDEN_DIM)
+            else:
+                self.gru = torch.nn.GRUCell(self.cfg.MODEL.HIDDEN_DIM, self.cfg.MODEL.HIDDEN_DIM)
         
     def process_weights(self, batch):
         if self.edge_weight_name == "edge_attr":
@@ -134,7 +139,10 @@ class MMOE_EncodeProcessDecode(torch.nn.Module):
                                                               edge_index=batch.edge_index, batch_assignment=batch.batch, task_index=task_index,
                                                               **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if (hasattr(batch, 'weights') and hasattr(self, "edge_weight_name")) })
                 if self.cfg.MODEL.GRU.ENABLE:
-                    hidden = self.gru(hidden, last_hidden)
+                    if self.cfg.MODEL.GRU.TASK_WISE:
+                        hidden = self.gru[task_name](hidden, last_hidden)
+                    else:
+                        hidden = self.gru(hidden, last_hidden)
             if self.training and self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT > 0.0:
                 ''' Decoder: just decoding node features to corresponding types '''
                 ''' Decode for every algorithmic step '''

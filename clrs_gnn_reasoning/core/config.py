@@ -21,6 +21,7 @@ _C.MODEL.PROCESSOR.KWARGS = [{}] # dict not allowed so we use list of dict and j
 
 _C.MODEL.GRU = CN()
 _C.MODEL.GRU.ENABLE = False
+_C.MODEL.GRU.TASK_WISE = False
 
 _C.MODEL.DECODER_USE_LAST_HIDDEN = False
 _C.MODEL.PROCESSOR_USE_LAST_HIDDEN = False

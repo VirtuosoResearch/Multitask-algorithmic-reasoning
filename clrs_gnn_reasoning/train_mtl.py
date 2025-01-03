@@ -106,6 +106,7 @@ if __name__ == '__main__':
     parser.add_argument("--hidden_dim", type=int, default=128, help="Hidden dimension")
     parser.add_argument("--gnn_layers", type=int, default=2, help="Message passing steps")
     parser.add_argument("--enable_gru", action="store_true", help="Enable GRU")
+    parser.add_argument("--enbale_gru_task_wise", action="store_true", help="Enable GRU task wise")
 
     parser.add_argument("--runs", type=int, default=1, help="Number of runs")
     parser.add_argument("--devices", type=int, nargs="+", default=[0], help="Devices to use")
@@ -143,6 +144,7 @@ if __name__ == '__main__':
     cfg.MODEL.HIDDEN_DIM = args.hidden_dim
     cfg.MODEL.MSG_PASSING_STEPS = args.gnn_layers
     cfg.MODEL.GRU.ENABLE = args.enable_gru
+    cfg.MODEL.GRU.TASK_WISE = args.enbale_gru_task_wise
     if args.use_complete_graph:
         cfg.MODEL.PROCESSOR.KWARGS[0].update({"edge_dim": 128})
     
