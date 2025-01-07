@@ -107,7 +107,8 @@ def incident_encoder(graph, name_dict, add_weights=False):
     nedges = 0
     for target_node in target_nodes:
       target_nodes_str += name_dict[target_node] + ", "
-      edge_weights_str += "{:.2f}".format(graph[source_node][target_node]["weight"]) + ", "
+      if add_weights:
+        edge_weights_str += "{:.2f}".format(graph[source_node][target_node]["weight"]) + ", "
       nedges += 1
     
     if add_weights:

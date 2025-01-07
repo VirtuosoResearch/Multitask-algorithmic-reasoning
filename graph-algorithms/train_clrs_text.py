@@ -201,6 +201,7 @@ if __name__ == "__main__":
     parser.add_argument("--minimum_samples", type=int, default=1e6)
     parser.add_argument("--minimum_samples_validation", type=int, default=1e6)
     parser.add_argument("--evaluate_training_set", action="store_true")
+    parser.add_argument("--evaluate_cot", action="store_true")
 
     parser.add_argument("--train_adapter", action="store_true")
     parser.add_argument("--reduction_factor", type=int, default=128)
@@ -266,7 +267,7 @@ if __name__ == "__main__":
         extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
         lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
         
         load_model_dir = args.load_model_dir
         load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
@@ -274,7 +275,7 @@ if __name__ == "__main__":
             if ("ckpt" in load_model_dir) and os.path.exists(load_model_dir):
                 lm = MultitaskModel.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
                 print(f"Loaded model from {load_model_dir}")
             elif ("pt" in load_model_dir) and os.path.exists(load_model_dir):
                 model.load_state_dict(torch.load(load_model_dir), strict=False)
@@ -350,7 +351,7 @@ if __name__ == "__main__":
                 model.load_state_dict(state_dict, strict=False)
                 lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
                 if args.use_3bit or args.use_2bit:
                     trainer.validate_loop.trainer_fn = TrainerFn.FITTING
                     trainer.validate_loop.inference_mode = False
@@ -367,7 +368,8 @@ if __name__ == "__main__":
             if args.evaluate_training_set:
                 summary = trainer.validate(lm, dataloaders=data_module.train_dataloader())[0]
                 summary = {f"train_{key}": val for key, val in summary.items()}
-            summary.update(trainer.validate(lm, dataloaders=data_module.val_dataloader())[0])
+            else:
+                summary.update(trainer.validate(lm, dataloaders=data_module.val_dataloader())[0])
             logging.info(summary)
         end_time = time.time()
         print(f"Evaluation time: {end_time - start_time}")

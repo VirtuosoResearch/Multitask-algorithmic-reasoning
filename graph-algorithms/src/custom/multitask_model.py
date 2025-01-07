@@ -30,7 +30,7 @@ class MultitaskModel(pl.LightningModule):
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
                 compute_gradients_seed = 0, project_gradients_dim = 200, gradients_dir = "test", 
-                compute_gradients_steps = 1e7, start_step = 0):
+                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False):
         """
         - completion_metadata: metaddata used to save completions. If None, completions are not saved.
           `epoch_N` is appended to the `train_key` when saving intermediate validation completions.
@@ -72,6 +72,7 @@ class MultitaskModel(pl.LightningModule):
         self.param_names = [name for name, param in model.named_parameters() if param.requires_grad]
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
+        self.evaluate_cot = evaluate_cot
 
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\
@@ -176,7 +177,8 @@ class MultitaskModel(pl.LightningModule):
                                             eos_token_id=self.tokenizer.eos_token_id).detach()
                 input_len = inputs["input_ids"].shape[1]
                 output[:, :input_len] = self.tokenizer.pad_token_id
-                output[:, input_len+output_len:] = self.tokenizer.pad_token_id
+                if not self.evaluate_cot:
+                    output[:, input_len+output_len:] = self.tokenizer.pad_token_id
             else:
                 output = None
         else:
@@ -259,7 +261,7 @@ class MultitaskModel(pl.LightningModule):
         gold_answers = batch["labels"].clone()
         gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
         output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
-
+        
         if self.generate_output:
             # Remove labels in inputs_ids
             is_label_mask = batch["labels"] != -100
@@ -279,8 +281,9 @@ class MultitaskModel(pl.LightningModule):
                                         eos_token_id=self.tokenizer.eos_token_id).detach()
             input_len = inputs["input_ids"].shape[1]
             output[:, :input_len] = self.tokenizer.pad_token_id
-            output[:, input_len+output_len:] = self.tokenizer.pad_token_id
-        
+            if not self.evaluate_cot:
+                output[:, input_len+output_len:] = self.tokenizer.pad_token_id
+
 
         output_dict = {
             "task_name": task_name,
@@ -319,10 +322,24 @@ class MultitaskModel(pl.LightningModule):
 
             pred_answers = self.tokenizer.batch_decode(batch['generates'], skip_special_tokens=True)
             gold_answers = self.tokenizer.batch_decode(batch['answers'], skip_special_tokens=True)
-            gold_answers = [[answer] for answer in gold_answers]
             if step == 0:
                 print("gold_answers", gold_answers[:4])
                 print("pred_answers", pred_answers[:4])
+            if self.evaluate_cot:
+                # remove the steps and only keeps the answers
+                for i, answer in enumerate(pred_answers):
+                    if "Answer:" in answer:
+                        answer = answer[answer.index("Answer:")+7:]
+                        pred_answers[i] = answer
+                    else:
+                        pred_answers[i] = answer
+                for i, answer in enumerate(gold_answers):
+                    if "Answer:" in answer:
+                        answer = answer[answer.index("Answer:")+7:]
+                        gold_answers[i] = answer
+                    else:
+                        gold_answers[i] = answer
+            gold_answers = [[answer] for answer in gold_answers]
             metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
             summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
             summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])

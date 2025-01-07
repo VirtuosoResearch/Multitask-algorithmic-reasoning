@@ -2,17 +2,20 @@
 from clrs_text_tasks.graph_text_encoder import encode_graph
 from clrs_text_tasks.utils import CLRSData, CLRSDataset, CLRSCollater
 from clrs_text_tasks.tasks import BellmanFordTask
+from clrs_text_tasks import task_name_to_tasks
 import json
 import os
 
 # %%
 
+task_name = "bfs"
+add_cot = True
+
 train_dataset = CLRSDataset(
      root="./data/CLRS",
-     algorithm='bellman_ford', split="train", num_samples=1000, use_complete_graph=False)
+     algorithm=task_name, split="train", num_samples=1000, use_complete_graph=False)
 
-task = BellmanFordTask()
-add_cot = False
+task = task_name_to_tasks[task_name]()
 
 examples = task.prepare_examples(
         train_dataset, encoding_method="incident", add_description=True, add_cot=add_cot
@@ -46,7 +49,7 @@ for num_samples in range(2, 11, 2):
 # %%
 val_dataset = CLRSDataset(
      root="./data/CLRS",
-     algorithm='bellman_ford', split="val", num_samples=32, use_complete_graph=False)
+     algorithm=task_name, split="val", num_samples=32, use_complete_graph=False)
 
 examples = task.prepare_examples(
         val_dataset, encoding_method="incident", add_description=True, add_cot=add_cot
@@ -62,7 +65,7 @@ write_examples(
 # %%
 val_dataset = CLRSDataset(
      root="./data/CLRS",
-     algorithm='bellman_ford', split="test", num_samples=32, use_complete_graph=False)
+     algorithm=task_name, split="test", num_samples=32, use_complete_graph=False)
 
 examples = task.prepare_examples(
         val_dataset, encoding_method="incident", add_description=True, add_cot=add_cot

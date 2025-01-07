@@ -31,9 +31,9 @@ class BellmanFordTask(GraphTask):
 	def __init__(self):
 		self.name = 'bellman_ford'
 		self.problem_description = "In a single-source shortest-paths problem, we are given a weighted directed graph and a source node. We aim to find the shortest path starting from source node to every other node. For each node, each node has a pointer to its predecessor along the optimal path from the source. By convention, the source node points to itself. "
-		self.algorithm_description = "The Bellman-Ford algorithm starts by initializing the distance to the source vertex as 0 and all other vertices as infinity. It then iteratively relaxes each edge in the graph V-1 times where V is the number of vertices. Relaxing an edge involves checking whether the distance to the destination vertex can be reduced by taking the edge and, if so, updating the distance and the predecessor. After V-1 iterations, the algorithm performs an additional pass to check for negative-weight cycles. If any edge can still be relaxed, it indicates the presence of a negative-weight cycle, which is reported. Otherwise, the shortest paths from the source to all vertices are finalized."
+		self.algorithm_description = "The Bellman-Ford algorithm starts by initializing the distance to the source node as 0 and all other vertices as infinity. It then iteratively relaxes each edge in the graph V-1 times where V is the number of vertices. Relaxing an edge involves checking whether the distance to the destination node can be reduced by taking the edge and, if so, updating the distance and the predecessor. After V-1 iterations, the algorithm performs an additional pass to check for negative-weight cycles. If any edge can still be relaxed, it indicates the presence of a negative-weight cycle, which is reported. Otherwise, the shortest paths from the source to all vertices are finalized."
 
-		self.question_prompt = "Question: Run the algorithm and return the the predecessor nodes of all nodes in the shortest path to node {source} in alphabetical order."
+		self.question_prompt = "Question: Run the algorithm and return the predecessor node of all nodes in the shortest path to node {source} in alphabetical order."
 		self.answer_prompt = "{answer}"
 		self.chain_of_thought_promt = "Steps: \n{steps}"
 	
@@ -90,6 +90,7 @@ class BellmanFordTask(GraphTask):
 		self, dataset, encoding_method="incident", num_samples=5, add_cot=False, random_seed=42): 
 		"""Create a recordio file with few-shot examples for the task."""
 		examples = self.prepare_examples(dataset, encoding_method, add_description=False, add_cot=add_cot)
+		no_cot_examples = self.prepare_examples(dataset, encoding_method, add_description=False, add_cot=False)
 		few_shot_example_list = [example['question'] + example['answer'] for example in examples]
 		random.seed(random_seed)
 
@@ -100,7 +101,90 @@ class BellmanFordTask(GraphTask):
 				few_shots_str += random.choice(few_shot_example_list) + '\n'
 			
 			# Revise the example question
+			if add_cot:
+				examples[i]['answer'] = examples[i]['question'][examples[i]['question'].index("Steps:"): ] + examples[i]['answer']
 			examples[i]['question'] = self.problem_description + "\n" + self.algorithm_description + "\n" + \
-				few_shots_str + examples[i]['question']
-		
+				few_shots_str + (no_cot_examples[i]['question'][:-9] if add_cot else no_cot_examples[i]['question'])
+			
+		return examples
+
+class BFSTask(GraphTask):
+	"""The breadth-first search task."""
+
+	def __init__(self):
+		self.name = 'bfs'
+		self.problem_description = "In the graph search problem, we are given a undirected and unweighted graph and a source node. We aim to explore the edges of the graph to discover every node that is reachable from the source node. For each node, each node has a pointer to its predecessor along the search procedure from the source. By convention, the source node points to itself."
+		self.algorithm_description = "The breadth-first search algorithm explores a graph level by level, starting from a specified source node. It begins by marking the source node as visited and enqueues it. The algorithm then repeatedly dequeues a node, processes it, and enqueues all its unvisited neighbors, marking them as visited to avoid reprocessing. This ensures that nodes are visited in increasing order of their distance from the source."
+
+		self.question_prompt = "Question: Run the algorithm and return the predecessor node of all nodes of the breadth-first traversal starting from node {source} in alphabetical order."
+		self.answer_prompt = "{answer}"
+		self.chain_of_thought_promt = "Steps: \n{steps}"
+	
+	def get_answer(self, data):
+		answer = list(data.edge_index.T[data.pi==1])
+		answer = sorted(answer, key=lambda x: x[0])
+		answer = [str(x[1].item()) for x in answer]
+		answer = ", ".join(answer)
+		return answer
+
+	def get_intermediate_results(self, data):
+		hints = data.pi_h
+		intermediate_results = []
+		for i in range(hints.shape[1]):
+			answer = list(data.edge_index.T[data.pi_h[:, i]==1])
+			if len(answer) < data.num_nodes: break
+			answer = sorted(answer, key=lambda x: x[0])
+			answer = [str(x[1].item()) for x in answer]
+			answer = ", ".join(answer)
+			intermediate_results.append(answer)
+		return intermediate_results
+	
+	def prepare_examples(
+		self,
+		dataset,
+		encoding_method="incident",
+		add_description=True,
+		add_cot=False,
+	):
+		examples = []
+		name_dict = graph_text_encoder.TEXT_ENCODER_DICT[encoding_method]
+		for ind, data in enumerate(dataset):
+			graph = nx.from_edgelist(data.edge_index.T.numpy())
+			graph_encoding = graph_text_encoder.encode_graph(graph, encoding_method, add_weights=False)
+
+			source = data.s.nonzero().item()
+			source = name_dict[source]
+			question = (self.problem_description + "\n" + self.algorithm_description + "\n" if add_description else "")
+			question += graph_encoding + self.question_prompt.format(source=source) 
+			if add_cot:
+				question += "\n" + self.chain_of_thought_promt.format(steps="\n".join(self.get_intermediate_results(data)))
+			question += "\nAnswer: "
+			answer = self.get_answer(data)
+			examples.append({
+				'id': str(ind),
+				'question': question,
+				'answer': answer,
+			})
+		return examples
+
+	def prepare_few_shot_examples(
+		self, dataset, encoding_method="incident", num_samples=5, add_cot=False, random_seed=42): 
+		"""Create a recordio file with few-shot examples for the task."""
+		examples = self.prepare_examples(dataset, encoding_method, add_description=False, add_cot=add_cot)
+		no_cot_examples = self.prepare_examples(dataset, encoding_method, add_description=False, add_cot=False)
+		few_shot_example_list = [example['question'] + example['answer'] for example in examples]
+		random.seed(random_seed)
+
+		for i, example in enumerate(examples):
+			# sample few shot string
+			few_shots_str = 'Example:\n'
+			for _ in range(num_samples):
+				few_shots_str += random.choice(few_shot_example_list) + '\n'
+			
+			# Revise the example question
+			if add_cot:
+				examples[i]['answer'] = examples[i]['question'][examples[i]['question'].index("Steps:"): ] + examples[i]['answer']
+			examples[i]['question'] = self.problem_description + "\n" + self.algorithm_description + "\n" + \
+				few_shots_str + (no_cot_examples[i]['question'][:-9] if add_cot else no_cot_examples[i]['question'])
+			
 		return examples
