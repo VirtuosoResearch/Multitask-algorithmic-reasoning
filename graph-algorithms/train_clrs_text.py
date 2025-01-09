@@ -61,9 +61,9 @@ def initialize_model(args):
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type='nf4'
                 )
-            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) #
+            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}, attn_implementation="flash_attention_2") 
         else:
-            model = AutoModelForCausalLM.from_pretrained(hf_key)
+            model = AutoModelForCausalLM.from_pretrained(hf_key, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
         model_type = "decoder"
         append_eos = True
     elif "flan" in model_key:

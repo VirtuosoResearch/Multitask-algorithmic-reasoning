@@ -183,9 +183,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
     parser.add_argument("--task_names", type=str, nargs="+", default=['edge_existence']) 
-    parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot'])
+    parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot']) # add graph generator behind like "zero_shot_ba"
     # "adjacency" "incident" "friendship" "south_park" "got" "politician" "social_network" "expert" "coauthorship" "random" 
     parser.add_argument("--text_encoders", type=str, nargs="+", default=['adjacency']) 
+    parser.add_argument("--min_nodes", type=int, default=1)
+    parser.add_argument("--max_nodes", type=int, default=20)
 
     parser.add_argument("--model_key", type=str, default="gpt2")
     parser.add_argument("--batch_size", type=int, default=8)
@@ -258,6 +260,7 @@ if __name__ == "__main__":
                 task_names=args.task_names,
                 prompt_styles=args.prompt_styles,
                 text_encoders=args.text_encoders,
+                node_range=[args.min_nodes, args.max_nodes],
                 tokenizer=tokenizer,
                 batch_size=batch_size,
                 inference_batch_size=inference_batch_size,

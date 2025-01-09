@@ -8,7 +8,7 @@ import os
 
 # %%
 
-task_name = "bfs"
+task_name = "dfs"
 add_cot = True
 
 train_dataset = CLRSDataset(
