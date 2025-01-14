@@ -34,19 +34,20 @@ class MultitaskBatchSampler(BatchSampler):
         train_data_list = []
         for dataset in self._datasets:
             train_data_list.append(
-                self._get_shuffled_index_batches(len(dataset), batch_size)
+                self._get_shuffled_index_batches(len(dataset), batch_size, shuffle=shuffle)
             )
         self._train_data_list = train_data_list
         self.shuffle = shuffle
     
     @staticmethod
-    def _get_shuffled_index_batches(dataset_len, batch_size):
+    def _get_shuffled_index_batches(dataset_len, batch_size, shuffle=True):
         index_batches = [
             list(range(i, min(i + batch_size, dataset_len))) # drop the last batch if it's smaller than batch_size
             for i in range(0, dataset_len, batch_size)
         ]
         random.seed(42)
-        random.shuffle(index_batches)
+        if shuffle:
+            random.shuffle(index_batches)
         return index_batches
 
     def __len__(self):
