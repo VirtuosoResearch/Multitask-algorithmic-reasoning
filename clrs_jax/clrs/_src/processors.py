@@ -317,9 +317,9 @@ class ET_Processor(Processor):
     node_fts = jnp.concatenate([node_fts, hidden], axis=-1)
     node_proj = hk.Linear(self.out_size)
 
-    if is_graph_fts_avail:
-      graph_fts = jnp.tile(jnp.expand_dims(graph_fts, -2), (1, n, 1))
-      node_fts = jnp.concatenate([node_fts, graph_fts], axis=-1)
+    # if is_graph_fts_avail: # Remove this if to always add graph_fts, for is_graph_fts_avail == False, we add zeros
+    graph_fts = jnp.tile(jnp.expand_dims(graph_fts, -2), (1, n, 1))
+    node_fts = jnp.concatenate([node_fts, graph_fts], axis=-1)
 
     """Composer"""
     z = jnp.expand_dims(node_fts, axis=2)  # Shape: (b, n, 1, d)
