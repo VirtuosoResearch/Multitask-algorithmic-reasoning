@@ -351,6 +351,153 @@ class ET_Processor(Processor):
 
     return z_out_diag, z_out
 
+
+class BranchingEdgeTransformer(hk.Module):
+  def __init__(
+      self,
+      out_size: int,
+      nb_heads: int,
+      num_layers: int = 5,
+      dropout: float = 0.0,
+      attention_dropout: float = 0.0,
+      residual: bool = False,
+      use_ln: bool = False,
+      activation: str = 'relu',
+      norm_first: bool = False,
+      branching_structure: List[dict] = None, # [{task_to_groups_1}, {task_to_groups_2}, ..., {task_to_groups_n}] n is the number of layers
+  ):
+    super().__init__(name="EdgeTransformer")
+    self.out_size = out_size
+    self.nb_heads = nb_heads
+    self.dropout = dropout
+    self.attention_dropout = attention_dropout
+    self.residual = residual
+    self.use_ln = use_ln
+    self.num_layers = num_layers
+    self.activation = activation
+    self.norm_first = norm_first
+    self.branching_structure = branching_structure
+    self.num_modules = [len(set(task_to_groups.values())) for task_to_groups in branching_structure]
+
+    if out_size % nb_heads != 0:
+      raise ValueError('The number of attention heads must divide the width!')
+
+  def __call__(self, x, is_training=False, algorithm_idx=0):
+    """EdgeTransformer inference step."""
+    # first create the modules
+    edge_transformer_layers = []
+    for i in range(self.num_layers):
+      cur_layer = []
+      for _ in range(self.num_modules[i]):
+        cur_layer.append(EdgeTransformerLayer(embed_dim=self.out_size,
+            num_heads=self.nb_heads,
+            dropout=self.dropout,
+            attention_dropout=self.attention_dropout,
+            activation=self.activation,
+            norm_first=self.norm_first))
+      edge_transformer_layers.append(cur_layer)
+
+    for i in range(self.num_layers):
+      module_idx = self.branching_structure[i][algorithm_idx]
+      x = edge_transformer_layers[i][module_idx](x, is_training=is_training)
+    return x
+
+class Branching_ET_Processor(Processor):
+  def __init__(
+      self,
+      out_size: int,
+      nb_heads: int,
+      num_layers: int,
+      activation: str = 'relu',
+      dropout: float = 0.0,
+      attention_dropout: float = 0.0,
+      residual: bool = False,
+      use_ln: bool = False,
+      name: str = 'edge_t',
+      norm_first: bool = False,
+      branching_structure: List[dict] = None, # [{task_to_groups_1}, {task_to_groups_2}, ..., {task_to_groups_n}] n is the number of layers
+  ):
+    super().__init__(name=name)
+
+    self.concat_dim = 2 * out_size
+    self.out_size = out_size
+    self.nb_heads = nb_heads
+    self.dropout = dropout
+    self.attention_dropout = attention_dropout
+    self.num_layers = num_layers
+    self.activation = activation
+    self.norm_first = norm_first
+    self.branching_structure = branching_structure
+
+  def __call__(
+      self,
+      node_fts: _Array,
+      edge_fts: _Array,
+      graph_fts: _Array,
+      adj_mat: _Array,
+      hidden: _Array,
+      **kwargs,
+  ) -> Tuple[_Array, Optional[_Array]]:
+    """EdgeTransformer inference step."""
+    node_proj = hk.Linear(self.out_size)
+
+    transformer = BranchingEdgeTransformer(
+        out_size=self.out_size,
+        nb_heads=self.nb_heads,
+        dropout=self.dropout,
+        attention_dropout=self.attention_dropout,
+        num_layers=self.num_layers,
+        activation=self.activation,
+        norm_first=self.norm_first,
+        branching_structure=self.branching_structure,
+    )
+
+    b, n, _ = node_fts.shape
+    assert edge_fts.shape[:-1] == (b, n, n)
+    assert graph_fts.shape[:-1] == (b,)
+    assert adj_mat.shape == (b, n, n)
+    is_training = not kwargs['repred']
+    readout = kwargs['readout']
+    is_graph_fts_avail = kwargs["is_graph_fts_avail"]
+
+    node_fts = jnp.concatenate([node_fts, hidden], axis=-1)
+    node_proj = hk.Linear(self.out_size)
+
+    # if is_graph_fts_avail: # Remove this if to always add graph_fts, for is_graph_fts_avail == False, we add zeros
+    graph_fts = jnp.tile(jnp.expand_dims(graph_fts, -2), (1, n, 1))
+    node_fts = jnp.concatenate([node_fts, graph_fts], axis=-1)
+
+    """Composer"""
+    z = jnp.expand_dims(node_fts, axis=2)  # Shape: (b, n, 1, d)
+    z_repeated = jnp.tile(z, reps=(1, 1, n, 1))  # Shape: (b, n, n, d)
+    z_repeated_t = jnp.transpose(z_repeated, (0, 2, 1, 3))
+    B = jnp.concatenate([z_repeated, z_repeated_t], axis=3)  # Shape: (b, n, n, 2d)
+
+    proj_node_fts = node_proj(B)
+    z_composed = proj_node_fts + edge_fts
+
+    """EdgeTransformer"""
+    z_out = transformer(z_composed, is_training=is_training, algorithm_idx=kwargs['algorithm_index'])
+
+    if readout == 'diagonal':
+      z_out_diag = jnp.einsum('biid->bid', z_out) # Shape: (b, n, d)
+    else:
+      b, n, d = node_fts.shape
+      linear_layer = hk.Linear(2 * d)
+      B_linear = linear_layer(z_out)
+
+      B_linear_first_d = B_linear[:, :, :, :d]
+      B_linear_other_d = B_linear[:, :, :, d:]
+
+      B_linear_first_d_sum = jnp.sum(B_linear_first_d, axis=1)  # Shape: (b, n, d)
+      B_linear_other_d_sum = jnp.sum(B_linear_other_d, axis=2)  # Shape: (b, n, d)
+
+      z_out_diag = B_linear_first_d_sum + B_linear_other_d_sum  # Shape: (b, n, d)
+      z_out_diag = MLP(d, self.out_size, linear=False)(z_out_diag, is_training=is_training)
+
+    return z_out_diag, z_out
+
+
 class GAT(Processor):
   """Graph Attention Network (Velickovic et al., ICLR 2018)."""
 
@@ -1012,7 +1159,8 @@ ProcessorFactory = Callable[[int], Processor]
 def get_processor_factory(kind: str,
                           use_ln: bool,
                           nb_triplet_fts: int,
-                          nb_heads: Optional[int] = None) -> ProcessorFactory:
+                          nb_heads: Optional[int] = None,
+                          branching_structure = None) -> ProcessorFactory:
   """Returns a processor factory.
 
   Args:
@@ -1054,6 +1202,17 @@ def get_processor_factory(kind: str,
           activation=activation,
           attention_dropout=attention_dropout,
           norm_first=norm_first,
+      )
+    elif kind == 'branching_edge_t':
+      processor = Branching_ET_Processor(
+          out_size=out_size,
+          nb_heads=nb_heads,
+          use_ln=use_ln,
+          num_layers=num_layers,
+          activation=activation,
+          attention_dropout=attention_dropout,
+          norm_first=norm_first,
+          branching_structure=branching_structure,
       )
     elif kind == 'gat_full':
       processor = GATFull(
