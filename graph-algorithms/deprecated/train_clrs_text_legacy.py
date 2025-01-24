@@ -3,7 +3,7 @@ import logging
 import os
 import wandb
 
-from src.custom.clrs_text_task_data_module import TextCLRSDataModule
+from src.custom.clrs_task_data_module import CLRSDataModule
 from src.custom.multitask_model import MultitaskModel
 
 from functools import partial
@@ -61,9 +61,9 @@ def initialize_model(args):
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type='nf4'
                 )
-            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) 
+            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}, attn_implementation="flash_attention_2") 
         else:
-            model = AutoModelForCausalLM.from_pretrained(hf_key, torch_dtype=torch.bfloat16)
+            model = AutoModelForCausalLM.from_pretrained(hf_key, torch_dtype=torch.bfloat16, attn_implementation="flash_attention_2")
         model_type = "decoder"
         append_eos = True
     elif "flan" in model_key:
@@ -178,8 +178,8 @@ def initialize_model(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--task_names", type=str, nargs="+", default=['dfs']) 
-    # parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot']) 
+    parser.add_argument("--task_names", type=str, nargs="+", default=['edge_existence']) 
+    parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot']) 
     
     parser.add_argument("--model_key", type=str, default="gpt2")
     parser.add_argument("--batch_size", type=int, default=8)
@@ -197,8 +197,6 @@ if __name__ == "__main__":
     parser.add_argument("--task_idxes", type=int, nargs="+", default=None)
     parser.add_argument("--save_every_epoch", action="store_true")
     parser.add_argument("--optimizer", type=str, default="adamw")
-
-    parser.add_argument("--eval_split", type=float, default=0.2)
     parser.add_argument("--downsample_ratio", type=float, default=1.0)
     parser.add_argument("--minimum_samples", type=int, default=1e6)
     parser.add_argument("--minimum_samples_validation", type=int, default=1e6)
@@ -252,21 +250,21 @@ if __name__ == "__main__":
         else:
             inference_batch_size = args.inference_batch_size
         
-        data_module = TextCLRSDataModule(
+        data_module = CLRSDataModule(
                 task_names=args.task_names,
+                prompt_styles=args.prompt_styles,
                 tokenizer=tokenizer,
                 batch_size=batch_size,
                 inference_batch_size=inference_batch_size,
                 max_input_length=args.max_length,
                 max_output_length=args.max_output_length,
                 eval_all=True,
-                eval_split=args.eval_split,
                 downsample_ratio=args.downsample_ratio,
                 minimum_samples=args.minimum_samples,
                 minimum_samples_validation=args.minimum_samples_validation)
         data_module.setup(stage="fit")
 
-        extended_task_names = [f"{task_name}" for task_name in args.task_names]
+        extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
         lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
