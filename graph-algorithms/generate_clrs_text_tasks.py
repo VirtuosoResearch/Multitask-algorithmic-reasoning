@@ -8,7 +8,7 @@ import os
 
 # %%
 
-task_name = "dfs"
+task_name = "bellman_ford"
 add_cot = True
 
 train_dataset = CLRSDataset(
@@ -17,10 +17,7 @@ train_dataset = CLRSDataset(
 
 task = task_name_to_tasks[task_name]()
 
-examples = task.prepare_examples(
-        train_dataset, encoding_method="incident", add_description=True, add_cot=add_cot
-    )
-
+# %%
 def write_examples(examples, output_path):
     with open(output_path + ".json", 'w') as file:
         for example in examples:
@@ -29,13 +26,21 @@ def write_examples(examples, output_path):
 root_dir = "./data/clrs_text_tasks"
 file_name = task.name + '_' + 'train' + ('_cot' if add_cot else '') + '_zero_shot'
 
+
+# %%
+examples = task.prepare_examples(
+        train_dataset, encoding_method="incident", add_description=True, add_cot=add_cot
+    )
+
+
 write_examples(
     examples,
     os.path.join(root_dir, file_name),
 )
 
+
 # %%
-for num_samples in range(2, 11, 2):
+for num_samples in range(15, 31, 5):
     examples = task.prepare_few_shot_examples(
             train_dataset, encoding_method="incident", num_samples=num_samples, add_cot=add_cot
         )

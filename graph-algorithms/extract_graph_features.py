@@ -1,7 +1,4 @@
 # %%
-from transformers import AutoTokenizer
-from src.custom.clrs_task_data_module import CLRSDataModule
-
 import torch
 from peft import get_peft_model, LoraConfig
 from transformers import AutoModelForSeq2SeqLM, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -78,9 +75,9 @@ def initialize_model(args):
 
 class args:
     model_key = "meta-llama/Llama-3.2-1B"
-    use_qlora = False
+    use_qlora = True
     devices = [0]
-    train_lora = False
+    train_lora = True
     lora_rank = 4
     lora_alpha = 32
 
@@ -184,7 +181,7 @@ class convert_format_to_extract_features:
         num_nodes = []; examples["output"] = []
         for answer in examples["answer"]:
             num_nodes.append(len(answer.split(", ")))
-            examples["output"].append(["<|reserved_special_token_0|>"]*num_nodes[-1])
+            examples["output"].append("".join(["<|reserved_special_token_0|>"]*num_nodes[-1]))
         return examples
 
 class CLRSDataModule(pl.LightningDataModule):
@@ -203,7 +200,8 @@ class CLRSDataModule(pl.LightningDataModule):
         downsample_ratio=1.0, # ratio of downsampling
         minimum_samples=100,
         minimum_samples_validation=100,
-        downsample_seed=0
+        downsample_seed=0,
+        extract_features=False,
     ):
         super().__init__()
 
@@ -227,6 +225,7 @@ class CLRSDataModule(pl.LightningDataModule):
         self.downsample_seed = downsample_seed
         self.minimum_sample = minimum_samples
         self.minimum_sample_validation = minimum_samples_validation
+        self.extract_features = extract_features
 
     def setup(self, stage=None):
         self.task_to_train_datasets = {}
@@ -243,21 +242,33 @@ class CLRSDataModule(pl.LightningDataModule):
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
             # convert the input and output format
-            train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            if self.extract_features:
+                column_names.remove("answer")
+                train_dataset = train_dataset.map(convert_format_to_extract_features(), batched=True, remove_columns=column_names)
+            else:
+                train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
 
             task_file_dir = "./data/clrs_text_tasks/{}_val_zero_shot.json".format(task_name)
             eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = eval_dataset.column_names
             # convert the input and output format
-            eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            if self.extract_features:
+                column_names.remove("answer")
+                eval_dataset = eval_dataset.map(convert_format_to_extract_features(), batched=True, remove_columns=column_names)
+            else:
+                eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
             
             task_file_dir = "./data/clrs_text_tasks/{}_test_zero_shot.json".format(task_name)
             predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = predict_dataset.column_names
             # convert the input and output format
-            predict_dataset = predict_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            if self.extract_features:
+                column_names.remove("answer")
+                predict_dataset = predict_dataset.map(convert_format_to_extract_features(), batched=True, remove_columns=column_names)
+            else:
+                predict_dataset = predict_dataset.map(convert_format(), batched=True, remove_columns=column_names)
 
             # Downsample the dataset if needed
             if self.downsample_rate < 1.0:
@@ -333,24 +344,177 @@ class CLRSDataModule(pl.LightningDataModule):
 
 # %%
 
-tokenizer.mask_token_id = 128002 # special token
-
-data_module = CLRSDataModule(task_names=["bellman_ford"],
+# tokenizer.mask_token_id = None # special token
+task_name = "bfs"
+data_module = CLRSDataModule(task_names=[task_name],
                 prompt_styles=["zero_shot"],
                 tokenizer=tokenizer,
-                batch_size=8,
-                inference_batch_size=8,
-                max_input_length=5000,
-                max_output_length=1024,
-                eval_all=True)
+                batch_size=4,
+                inference_batch_size=4,
+                max_input_length=2000,
+                max_output_length=256,
+                eval_all=True,
+                extract_features=True,
+                shuffle_train=False)
 data_module.setup(stage="fit")
 
 # 3500 5000 7000 9000 12000
 # cot 5000 7000 9000 11000 13000
 
+# %%
 for batch in data_module.train_dataloader():
     print(batch)
     break
 
 tokenizer.batch_decode(batch['data']['input_ids'], skip_special_tokens=True)
 print(tokenizer.batch_decode(batch['data']['input_ids'], skip_special_tokens=True)[0])
+
+# %%
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+model.eval()
+if not args.use_qlora:
+    model.to(device)
+
+train_node_features = []
+with torch.no_grad():
+    for batch in data_module.train_dataloader():
+        batch = {k: v.to(device) for k, v in batch['data'].items()}
+        outputs = model(**batch, output_hidden_states=True)
+        hidden_states = outputs.hidden_states[-1] # last layer
+        hidden_states = hidden_states[:, :-1].contiguous()
+        batch["labels"] = batch["labels"][:, 1:].contiguous()
+        for batch_idx in range(len(batch["labels"])):
+            batch_node_features = hidden_states[batch_idx][batch["labels"][batch_idx] == 128002] # 128002 is the mask token
+            train_node_features.append(batch_node_features.detach().type(torch.float).to("cpu").numpy())
+
+train_node_features = np.stack(train_node_features, axis=0)
+np.save(f"{task_name}_train_node_features.npy", train_node_features)
+
+# %%
+val_node_features = []
+with torch.no_grad():
+    for batch in data_module.val_dataloader():
+        batch = {k: v.to(device) for k, v in batch['data'].items()}
+        outputs = model(**batch, output_hidden_states=True)
+        hidden_states = outputs.hidden_states[-1] # last layer
+        hidden_states = hidden_states[:, :-1].contiguous()
+        batch["labels"] = batch["labels"][:, 1:].contiguous()
+        for batch_idx in range(len(batch["labels"])):
+            batch_node_features = hidden_states[batch_idx][batch["labels"][batch_idx] == 128002] # 128002 is the mask token
+            val_node_features.append(batch_node_features.detach().type(torch.float).to("cpu").numpy())
+
+val_node_features = np.stack(val_node_features, axis=0)
+np.save(f"{task_name}_val_node_features.npy", val_node_features)
+# %%
+
+train_node_labels = []
+for data in data_module.task_to_train_datasets[f"{task_name}_zero_shot"]:
+    tmp_labels = data['answer'].split(", ")
+    tmp_labels = np.array([int(label) for label in tmp_labels])
+    train_node_labels.append(tmp_labels)
+
+train_node_labels = np.stack(train_node_labels, axis=0)
+np.save(f"{task_name}_train_node_labels.npy", train_node_labels)
+
+# %%
+val_node_labels = []
+for data in data_module.task_to_valid_datasets[f"{task_name}_zero_shot"]:
+    tmp_labels = data['answer'].split(", ")
+    tmp_labels = np.array([int(label) for label in tmp_labels])
+    val_node_labels.append(tmp_labels)
+
+val_node_labels = np.stack(val_node_labels, axis=0)
+np.save(f"{task_name}_val_node_labels.npy", val_node_labels)
+
+# %%
+import numpy as np
+train_node_features = np.load(f"{task_name}_train_node_features.npy")
+train_node_labels = np.load(f"{task_name}_train_node_labels.npy")
+
+val_node_features = np.load(f"{task_name}_val_node_features.npy")
+val_node_labels = np.load(f"{task_name}_val_node_labels.npy")
+
+# %%
+num_training = 1000
+train_node_features = train_node_features[:num_training]
+train_node_labels = train_node_labels[:num_training]
+
+train_node_features = train_node_features.reshape( -1, train_node_features.shape[-1])
+val_node_features = val_node_features.reshape( -1, val_node_features.shape[-1])
+train_node_labels = train_node_labels.reshape(-1)
+val_node_labels = val_node_labels.reshape(-1)
+
+# train_node_features = train_node_features[:, 0, :]
+# val_node_features = val_node_features[:, 0, :]
+# train_node_labels = train_node_labels[:, 0]
+# val_node_labels = val_node_labels[:, 0]
+
+# normalize the features to uniform norm
+# train_node_features = train_node_features / np.linalg.norm(train_node_features, axis=1, keepdims=True)
+# val_node_features = val_node_features / np.linalg.norm(val_node_features, axis=1, keepdims=True)
+
+# %%
+# use a simple Linear layer for classification 
+import torch
+import torch.nn as nn
+
+num_class = 16
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+model = nn.Sequential(
+    nn.Linear(train_node_features.shape[-1], 256),
+    # nn.ReLU(),
+    nn.Linear(256, num_class))
+model.to(device)
+
+criterion = nn.CrossEntropyLoss()
+
+train_loader = torch.utils.data.DataLoader(
+    torch.utils.data.TensorDataset(torch.Tensor(train_node_features), torch.Tensor(train_node_labels).long()), 
+    batch_size=256, shuffle=True)
+test_loader = torch.utils.data.DataLoader(
+    torch.utils.data.TensorDataset(torch.Tensor(val_node_features), torch.Tensor(val_node_labels).long()), 
+    batch_size=256, shuffle=False)
+
+# optimizer = torch.optim.SGD(model.parameters(), lr=2e-4, momentum=0.9, weight_decay=1e-4)
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=5e-4)
+num_epochs = 1000
+
+# %%
+for epoch in range(1, num_epochs+1):
+    training_loss = 0.0
+    for data, target in train_loader:
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        log_probs = nn.functional.log_softmax(output, dim=1)
+        loss = torch.nn.functional.nll_loss(log_probs, target)
+        # criterion(output, target)
+        loss.backward()
+        training_loss += loss.item()
+        optimizer.step()
+    
+    if epoch % 10 == 0:
+        print("Epoch: {}, Training Loss: {}".format(epoch, training_loss/len(train_loader)))
+
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            test_loss = 0
+            for data, target in test_loader:
+                data, target = data.to(device), target.to(device)
+                outputs = model(data)
+                log_probs = nn.functional.log_softmax(outputs, dim=1)
+                test_loss += nn.functional.nll_loss(log_probs, target).item()
+                predicted = torch.argmax(outputs.data, 1)
+                total += target.size(0)
+                correct += (predicted == target).sum().item()
+            
+
+        print('Epoch: {}, Test Loss: {}, Accuracy: {}'.format(epoch, test_loss/len(test_loader), 100 * correct / total))
+
+ #%%
+'''
+Bellman ford: 62.5
+BFS: 81.2
+'''

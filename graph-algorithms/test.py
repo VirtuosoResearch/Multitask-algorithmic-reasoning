@@ -161,9 +161,10 @@ write_examples(
 # %%
 from datasets import load_dataset
 
-fs_cot_dataset = load_dataset("json", data_files="./data/tasks/connected_nodes_zero_cot_test.json")['train']
-fs_cot_dataset[0]
-
+dataset = load_dataset("json", data_files="./data/tasks/nodes_80_100/edge_existence_zero_shot_er_test.json")['train']
+# for i in range(100):
+#     # print(dataset[i]['question'])
+#     print(dataset[i]['nnodes'], dataset[i]['nedges'], dataset[i]['answer'])
 
 # %%
 from transformers import AutoTokenizer
@@ -172,6 +173,13 @@ from src.custom.algorithm_task_data_module import AlgorithmDataModule
 tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-3.2-1B")
 tokenizer.pad_token_id = tokenizer.eos_token_id
 
+lens = []
+for i in range(1000):
+    lens.append(len(tokenizer(dataset[i]['question'])['input_ids']))
+    print(lens[-1])
+print(max(lens), min(lens), sum(lens) / len(lens))
+
+# %%
 data_module = AlgorithmDataModule(
     task_names=["node_degree"],
     prompt_styles=["zero_shot"],
