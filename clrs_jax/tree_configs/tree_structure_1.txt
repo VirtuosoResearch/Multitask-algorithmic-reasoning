@@ -1,0 +1,9 @@
+1: bfs dfs topological_sort strongly_connected_components dag_shortest_paths
+1: dijkstra bellman_ford mst_kruskal
+1: bridges articulation_points mst_prim floyd_warshall
+2: bfs topological_sort dag_shortest_paths
+2: dfs
+2: strongly_connected_components
+2: bridges articulation_points mst_prim floyd_warshall
+2: dijkstra
+2: bellman_ford mst_kruskal

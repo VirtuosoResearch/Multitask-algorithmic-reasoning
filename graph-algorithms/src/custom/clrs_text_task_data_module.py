@@ -84,11 +84,46 @@ class CasualLMInstructionCollator:
         
         return model_inputs
 
+def get_length(question):
+    start_index = question.find('A:')
+    end_index = question.find(', initial_trace:')
+    question = question[start_index:end_index]
+    return len(question.split(','))
+
+class add_length:
+
+    def __call__(self, examples):
+        examples["length"] = [get_length(q) for q in examples['question']]
+        return examples
+
 class convert_format:
 
     def __call__(self, examples):
         examples["input"] = examples["question"][:]
         examples["output"] = examples["answer"][:]
+        return examples
+    
+class convert_few_shot_format:
+    
+    def __init__(self, train_dataset, k=5, seed=42):
+        self.train_dataset = train_dataset
+        self.k = k
+        self.rng = np.random.default_rng(seed)
+
+    def _concat_examples(self, examples, question):
+        output = "".join([example["question"] + example["answer"] for example in examples])
+        output += question
+        return output
+
+    def __call__(self, examples):
+        # randomly select from train dataset
+        examples["input"] = []
+        examples["output"] = []
+        for i in range(len(examples["question"])):
+            few_shot_examples = self.rng.choice(len(self.train_dataset), self.k, replace=False)
+            few_shot_examples = [self.train_dataset[int(few_shot_example)] for few_shot_example in few_shot_examples]
+            examples["input"].append(self._concat_examples(few_shot_examples, examples["question"][i]))
+            examples["output"].append(examples["answer"][i])
         return examples
 
 class TextCLRSDataModule(pl.LightningDataModule):
@@ -103,11 +138,15 @@ class TextCLRSDataModule(pl.LightningDataModule):
         max_output_length=64,
         shuffle_train=True,
         eval_all=False,
+        train_lengths=[4],
+        test_lengths=[4],
         eval_split=0.1,
         downsample_ratio=1.0, # ratio of downsampling
         minimum_samples=100,
         minimum_samples_validation=100,
-        downsample_seed=0
+        downsample_seed=0,
+        use_few_shot=False,
+        few_shot_k=5
     ):
         super().__init__()
 
@@ -124,11 +163,15 @@ class TextCLRSDataModule(pl.LightningDataModule):
         self.shuffle_train = shuffle_train
         self.eval_all = eval_all
 
+        self.train_lengths = train_lengths
+        self.test_lengths = test_lengths
         self.eval_split = eval_split # the ratio of the validation set
         self.downsample_rate = downsample_ratio
         self.downsample_seed = downsample_seed
         self.minimum_sample = minimum_samples
         self.minimum_sample_validation = minimum_samples_validation
+        self.use_few_shot = use_few_shot
+        self.few_shot_k = few_shot_k
 
     def setup(self, stage=None):
         self.task_to_train_datasets = {}
@@ -141,22 +184,27 @@ class TextCLRSDataModule(pl.LightningDataModule):
             # Split the dataset into train and validation
             train_dataset = load_dataset("tomg-group-umd/CLRS-Text-train")['train']
             train_dataset = train_dataset.filter(lambda x: x['algo_name'] == task_name)
+            train_dataset = train_dataset.map(add_length(), batched=True)
+            train_dataset = train_dataset.filter(lambda x: x['length'] in self.train_lengths)
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
             # convert the input and output format
-            train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
-
+            train_dataset = train_dataset.map(convert_format(), batched=True) # remove_columns=column_names
             # split dataset
             tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split)
             train_dataset = tmp_datasets['train']
             eval_dataset = tmp_datasets['test']
             
-            predict_dataset = load_dataset("tomg-group-umd/CLRS-Text-test")['test_1'] # TODO: verify
+            predict_dataset = load_dataset("tomg-group-umd/CLRS-Text-test")['test_1']
             predict_dataset = predict_dataset.filter(lambda x: x['algo_name'] == task_name)
+            predict_dataset = predict_dataset.filter(lambda x: x['length'] in self.test_lengths)
             # fileter out the examples by the text encoder
             column_names = predict_dataset.column_names
             # convert the input and output format
-            predict_dataset = predict_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            if self.use_few_shot:
+                predict_dataset = predict_dataset.map(convert_few_shot_format(train_dataset, k=self.few_shot_k), batched=True)
+            else:
+                predict_dataset = predict_dataset.map(convert_format(), batched=True)
 
             # Downsample the dataset if needed
             if self.downsample_rate < 1.0:
@@ -196,6 +244,9 @@ class TextCLRSDataModule(pl.LightningDataModule):
                                                                 batch_size=self.inference_batch_size, drop_last=False, task_to_datasets=self.task_to_valid_datasets, shuffle=False)
             # self.task_to_valid_datasets, self.inference_batch_size, shuffle=False)
 
+        self.multitask_test_sampler = MultitaskBatchSampler(sampler=np.arange(sum([len(dataset) for dataset in self.task_to_test_datasets.values()])), 
+                                                                batch_size=self.inference_batch_size, drop_last=False, task_to_datasets=self.task_to_test_datasets, shuffle=False)
+
         if hasattr(self, "residuals") and hasattr(self, "weights"):
             cur_len = 0
             for extended_task_name, train_dataset in self.task_to_train_datasets.items():
@@ -228,7 +279,7 @@ class TextCLRSDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(
             self.multitask_test_dataset,
-            batch_sampler=self.multitask_valid_sampler,
+            batch_sampler=self.multitask_test_sampler,
             collate_fn=self.multitask_collator,
             num_workers=15
         )

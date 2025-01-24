@@ -72,7 +72,7 @@ class MultitaskModel(pl.LightningModule):
         self.param_names = [name for name, param in model.named_parameters() if param.requires_grad]
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
-        self.evaluate_cot = evaluate_cot
+        self.evaluate_cot = evaluate_cot # deprecated
 
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\

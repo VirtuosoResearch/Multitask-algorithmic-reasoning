@@ -194,7 +194,6 @@ if __name__ == "__main__":
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--max_length", type=int, default=256)
     parser.add_argument("--max_output_length", type=int, default=64)
-    parser.add_argument("--task_idxes", type=int, nargs="+", default=None)
     parser.add_argument("--save_every_epoch", action="store_true")
     parser.add_argument("--optimizer", type=str, default="adamw")
 
@@ -202,8 +201,10 @@ if __name__ == "__main__":
     parser.add_argument("--downsample_ratio", type=float, default=1.0)
     parser.add_argument("--minimum_samples", type=int, default=1e6)
     parser.add_argument("--minimum_samples_validation", type=int, default=1e6)
-    parser.add_argument("--evaluate_training_set", action="store_true")
-    parser.add_argument("--evaluate_cot", action="store_true")
+    parser.add_argument("--train_lengths", type=int, nargs="+", default=[4])
+    parser.add_argument("--test_lengths", type=int, nargs="+", default=[4])
+    parser.add_argument("--few_shot_k", type=int, default=0)
+    parser.add_argument("--only_evaluate_test_set", action="store_true")
 
     parser.add_argument("--train_adapter", action="store_true")
     parser.add_argument("--reduction_factor", type=int, default=128)
@@ -263,13 +264,17 @@ if __name__ == "__main__":
                 eval_split=args.eval_split,
                 downsample_ratio=args.downsample_ratio,
                 minimum_samples=args.minimum_samples,
-                minimum_samples_validation=args.minimum_samples_validation)
+                minimum_samples_validation=args.minimum_samples_validation,
+                train_lengths=args.train_lengths,
+                test_lengths=args.test_lengths,
+                use_few_shot=(args.few_shot_k > 0), 
+                few_shot_k=args.few_shot_k)
         data_module.setup(stage="fit")
 
         extended_task_names = [f"{task_name}" for task_name in args.task_names]
         lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
         
         load_model_dir = args.load_model_dir
         load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
@@ -277,7 +282,7 @@ if __name__ == "__main__":
             if ("ckpt" in load_model_dir) and os.path.exists(load_model_dir):
                 lm = MultitaskModel.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 print(f"Loaded model from {load_model_dir}")
             elif ("pt" in load_model_dir) and os.path.exists(load_model_dir):
                 model.load_state_dict(torch.load(load_model_dir), strict=False)
@@ -353,7 +358,7 @@ if __name__ == "__main__":
                 model.load_state_dict(state_dict, strict=False)
                 lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, evaluate_cot=args.evaluate_cot)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 if args.use_3bit or args.use_2bit:
                     trainer.validate_loop.trainer_fn = TrainerFn.FITTING
                     trainer.validate_loop.inference_mode = False
@@ -367,10 +372,12 @@ if __name__ == "__main__":
                 trainer.validate_loop.inference_mode = False
 
             summary = {}
-            if args.evaluate_training_set:
-                summary = trainer.validate(lm, dataloaders=data_module.train_dataloader())[0]
-                summary = {f"train_{key}": val for key, val in summary.items()}
+            if args.only_evaluate_test_set:
+                summary = trainer.validate(lm, dataloaders=data_module.test_dataloader())[0]
+                summary = {f"test_{key}": val for key, val in summary.items()}
             else:
+                summary = trainer.validate(lm, dataloaders=data_module.test_dataloader())[0]
+                summary = {f"test_{key}": val for key, val in summary.items()}
                 summary.update(trainer.validate(lm, dataloaders=data_module.val_dataloader())[0])
             logging.info(summary)
         end_time = time.time()
