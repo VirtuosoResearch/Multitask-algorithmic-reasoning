@@ -30,6 +30,7 @@ import requests
 import tensorflow as tf
 import wandb
 
+from pynvml import *
 
 flags.DEFINE_list('algorithms', ['dijkstra'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['16'],
@@ -111,6 +112,9 @@ flags.DEFINE_boolean('use_lstm', False,
                      'Whether to insert an LSTM after message passing.')
 flags.DEFINE_integer('nb_triplet_fts', 8,
                      'How many triplet features to compute?')
+flags.DEFINE_boolean('use_projection', False,
+                      'Whether to use a projection layer after the processor.')
+flags.DEFINE_integer('projection_dim', 16, 'Dimension of the projection layer.')
 
 flags.DEFINE_enum('encoder_init', 'xavier_on_scalars',
                   ['default', 'xavier_on_scalars'],
@@ -120,7 +124,7 @@ flags.DEFINE_enum('processor_type', 'edge_t',
                    'triplet_mpnn', 'triplet_pgn', 'triplet_pgn_mask',
                    'gat', 'gatv2', 'gat_full', 'gatv2_full',
                    'gpgn', 'gpgn_mask', 'gmpnn',
-                   'triplet_gpgn', 'triplet_gpgn_mask', 'triplet_gmpnn', 'edge_t'],
+                   'triplet_gpgn', 'triplet_gpgn_mask', 'triplet_gmpnn', 'edge_t', 'branching_edge_t'],
                   'Processor type to use as the network P.')
 flags.DEFINE_enum('node_readout', 'diagonal',
                   ['diagonal', 'sophisticated'],
@@ -138,6 +142,13 @@ flags.DEFINE_string('wandb_name', None,
                     'Name of `wandb` run.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
+
+
+flags.DEFINE_boolean('use_branching_structure', False,
+                     'Whether to define the branching structure of the model.')
+flags.DEFINE_string('branching_structure_dir', None,
+                    'Path to the directory where the branching structure is stored.')
+
 
 FLAGS = flags.FLAGS
 
@@ -247,6 +258,7 @@ def make_sampler(length: int,
   spec, sampler = clrs.process_permutations(spec, sampler, enforce_permutations)
   if chunked:
     sampler = clrs.chunkify(sampler, chunk_length)
+  # Note: sampler is as an generator
   return sampler, num_samples, spec
 
 
@@ -389,6 +401,41 @@ def create_samplers(rng, train_lengths: List[int]):
           spec_list, is_graph_fts_avail)
 
 
+def print_gpu_utilization():
+    nvmlInit()
+    memory = 0
+    handle = nvmlDeviceGetHandleByIndex(0)
+    info = nvmlDeviceGetMemoryInfo(handle)
+    # print(info.used, info.total)
+    print(f"GPU memory occupied: {info.used//1024**2} MB.")
+    memory += info.used//1024**2
+
+    handle = nvmlDeviceGetHandleByIndex(1)
+    info = nvmlDeviceGetMemoryInfo(handle)
+    # print(info.used, info.total)
+    print(f"GPU memory occupied: {info.used//1024**2} MB.")
+    memory += info.used//1024**2
+    print(f"Total GPU memory occupied: {memory} MB.")
+
+
+def load_branching_structure(branching_structure_dir, algorithms, num_layers):
+  """Load the branching structure of the model."""
+  branching_structure = []
+  for _ in range(num_layers):
+    branching_structure.append({i: 0 for i in range(len(algorithms))}) 
+  num_groups = [0]*num_layers
+
+  with open(os.path.join("tree_configs", branching_structure_dir+".txt"), 'r') as f:
+    for line in f.readlines():
+      line = line.strip()
+      layer, task_group = line.split(":")
+      layer = int(layer); task_group = task_group.strip().split(" ")
+      for algo in task_group:
+        branching_structure[layer].update({algorithms.index(algo): num_groups[layer]})
+      num_groups[layer] += 1
+  print("Branching structure: ", branching_structure)
+  return branching_structure
+
 def main(unused_argv):
   if FLAGS.hint_mode == 'encoded_decoded':
     encode_hints = True
@@ -407,7 +454,7 @@ def main(unused_argv):
   rng = np.random.RandomState(FLAGS.seed)
   rng_key = jax.random.PRNGKey(rng.randint(2**32))
 
-  # Create samplers
+  # Create samplers. Note: This is the dataset
   (train_samplers,
    val_samplers, val_sample_counts,
    test_samplers, test_sample_counts,
@@ -442,12 +489,21 @@ def main(unused_argv):
       config={"dataset": "clrs30", **dict(config)},
     )
 
+  if FLAGS.use_branching_structure:
+    branching_structure = load_branching_structure(FLAGS.branching_structure_dir, FLAGS.algorithms, FLAGS.num_layers)
+  else:
+    branching_structure = None
+
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
       use_ln=FLAGS.use_ln,
       nb_triplet_fts=FLAGS.nb_triplet_fts,
-      nb_heads=FLAGS.nb_heads
+      nb_heads=FLAGS.nb_heads,
+      branching_structure=branching_structure
   )
+  checkpoint_path = os.path.join(FLAGS.checkpoint_path, "_".join(FLAGS.algorithms))
+  if not os.path.exists(checkpoint_path):
+    os.makedirs(checkpoint_path)
   model_params = dict(
       processor_factory=processor_factory,
       hidden_dim=FLAGS.hidden_size,
@@ -457,7 +513,7 @@ def main(unused_argv):
       use_lstm=FLAGS.use_lstm,
       learning_rate=FLAGS.learning_rate,
       grad_clip_max_norm=FLAGS.grad_clip_max_norm,
-      checkpoint_path=FLAGS.checkpoint_path,
+      checkpoint_path=checkpoint_path,
       freeze_processor=FLAGS.freeze_processor,
       dropout_prob=FLAGS.dropout_prob,
       hint_teacher_forcing=FLAGS.hint_teacher_forcing,
@@ -468,6 +524,8 @@ def main(unused_argv):
       attention_dropout=FLAGS.attention_dropout_prob,
       norm_first_att=FLAGS.norm_first_att,
       node_readout=FLAGS.node_readout,
+      use_projection=FLAGS.use_projection,
+      projection_dim=FLAGS.projection_dim,
   )
   if not FLAGS.use_graph_fts:
       is_graph_fts_avail = [False] * len(is_graph_fts_avail)
@@ -499,6 +557,7 @@ def main(unused_argv):
 
   for algo_idx in range(len(train_samplers)):
     logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
+  # Note: start training loop
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
 
@@ -516,7 +575,7 @@ def main(unused_argv):
       else:
         train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
 
-    # Training step.
+    # Training step. Note: if there are multiple samplers, it will apply one step per sampler
     for algo_idx in range(len(train_samplers)):
       feedback = feedback_list[algo_idx]
       rng_key, new_rng_key = jax.random.split(rng_key)
@@ -528,6 +587,7 @@ def main(unused_argv):
         # In non-chunked training, all training lengths can be treated equally,
         # since there is no state to maintain between batches.
         length_and_algo_idx = algo_idx
+      # Note: here computes the loss
       cur_loss = train_model.feedback(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
       accum_loss += cur_loss
       rng_key = new_rng_key
@@ -540,6 +600,9 @@ def main(unused_argv):
       logging.info('Algo %s step %i current loss %f, current_train_items %i.',
                    FLAGS.algorithms[algo_idx], step,
                    cur_loss, current_train_items[algo_idx])
+      
+      if step == 1:
+        print_gpu_utilization()
 
     # Periodically evaluate model
     if step >= next_eval:
@@ -593,7 +656,7 @@ def main(unused_argv):
     step += 1
     length_idx = (length_idx + 1) % len(train_lengths)
 
-  logging.info(f'Restoring best model from checkpoint {FLAGS.checkpoint_path}...')
+  logging.info(f'Restoring best model from checkpoint {checkpoint_path}...')
   eval_model.restore_model('best.pkl', only_load_processor=False)
 
   for algo_idx in range(len(train_samplers)):

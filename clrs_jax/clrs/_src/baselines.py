@@ -160,6 +160,8 @@ class BaselineModel(model.Model):
       attention_dropout: float = 0.0,
       norm_first_att: bool = False,
       node_readout: str = 'diagonal',
+      use_projection: bool = False,
+      projection_dim: int = 16,
   ):
     """Constructor for BaselineModel.
 
@@ -243,9 +245,11 @@ class BaselineModel(model.Model):
         nb_dims[outp.name] = outp.data.shape[-1]
       self.nb_dims.append(nb_dims)
 
+    self.use_projection = use_projection; self.projection_dim = projection_dim
     self._create_net_fns(hidden_dim, encode_hints, processor_factory, use_lstm,
                          encoder_init, dropout_prob, hint_teacher_forcing, hint_repred_mode, 
-                         num_layers, activation, attention_dropout, norm_first_att, node_readout)
+                         num_layers, activation, attention_dropout, norm_first_att, node_readout,
+                         use_projection, projection_dim)
     self._device_params = None
     self._device_opt_state = None
     self.opt_state_skeleton = None
@@ -253,13 +257,16 @@ class BaselineModel(model.Model):
   def _create_net_fns(self, hidden_dim, encode_hints, processor_factory,
                       use_lstm, encoder_init, dropout_prob,
                       hint_teacher_forcing, hint_repred_mode,
-                      num_layers, activation, attention_dropout, norm_first_att, node_readout):
+                      num_layers, activation, attention_dropout, norm_first_att, node_readout,
+                      use_projection, projection_dim):
     def _use_net(*args, **kwargs):
+      # Note: This creates the network
       return nets.Net(self._spec, hidden_dim, encode_hints, self.decode_hints,
                       processor_factory, use_lstm, encoder_init,
                       dropout_prob, hint_teacher_forcing, num_layers,
                       attention_dropout, activation, hint_repred_mode,
-                      self.nb_dims, self.nb_msg_passing_steps, norm_first=norm_first_att, node_readout=node_readout)(*args, **kwargs)
+                      self.nb_dims, self.nb_msg_passing_steps, norm_first=norm_first_att, node_readout=node_readout,
+                      use_projection=use_projection, projection_dim=projection_dim)(*args, **kwargs)
 
     self.net_fn = hk.transform(_use_net)
     pmap_args = dict(axis_name='batch', devices=jax.local_devices())
@@ -288,6 +295,17 @@ class BaselineModel(model.Model):
                                    algorithm_index=-1,
                                    return_hints=False,
                                    return_all_outputs=False, is_graph_fts_avail=is_graph_fts_avail)
+    processor_params = 0; encoder_params = 0; decoder_params = 0
+    for key in self.params:
+      for param in self.params[key]:
+        print(key, param, self.params[key][param].shape)
+        if 'processor' in key:
+          processor_params += np.prod(self.params[key][param].shape)
+        elif 'enc_' in key:
+          encoder_params += np.prod(self.params[key][param].shape)
+        elif 'dec_' in key:
+          decoder_params += np.prod(self.params[key][param].shape)
+    print("Processor params: ", processor_params, "Encoder params: ", encoder_params, "Decoder params: ", decoder_params)
     self.opt_state = self.opt.init(self.params)
     # We will use the optimizer state skeleton for traversal when we
     # want to avoid updating the state of params of untrained algorithms.
@@ -403,6 +421,7 @@ class BaselineModel(model.Model):
 
   def _loss(self, params, rng_key, feedback, algorithm_index, is_graph_fts_avail):
     """Calculates model loss f(feedback; params)."""
+    # Note: This is the main function for computing the loss.
     output_preds, hint_preds = self.net_fn.apply(
         params, rng_key, [feedback.features],
         repred=False,

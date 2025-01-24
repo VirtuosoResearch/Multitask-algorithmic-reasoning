@@ -63,6 +63,15 @@ def log_sinkhorn(x: _Array, steps: int, temperature: float, zero_diagonal: bool,
     x = jax.nn.log_softmax(x, axis=-2)
   return x
 
+def contruct_projectors(projection_dim: int, name: str, is_graph_fts: bool=True):
+  linear = functools.partial(hk.Linear, name=f"{name}_projector_linear")
+  if is_graph_fts:
+    # projectors for node, edge and graph features
+    projectors = (linear(projection_dim), linear(projection_dim), linear(projection_dim))
+  else:
+    # projectors for node and edge features
+    projectors = (linear(projection_dim), linear(projection_dim))
+  return projectors
 
 def construct_decoders(loc: str, t: str, hidden_dim: int, nb_dims: int,
                        name: str):

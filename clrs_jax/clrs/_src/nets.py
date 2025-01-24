@@ -91,6 +91,8 @@ class Net(hk.Module):
       name: str = 'net',
       norm_first: bool = False,
       node_readout: str = 'diagonal',
+      use_projection: bool = False,
+      projection_dim: int = 16,
   ):
     """Constructs a `Net`."""
     super().__init__(name=name)
@@ -112,6 +114,8 @@ class Net(hk.Module):
     self.activation = activation
     self.norm_first = norm_first
     self.node_readout = node_readout
+    self.use_projection = use_projection
+    self.projection_dim = projection_dim
 
   def _msg_passing_step(self,
                         mp_state: _MessagePassingScanState,
@@ -126,9 +130,11 @@ class Net(hk.Module):
                         spec: _Spec,
                         encs: Dict[str, List[hk.Module]],
                         decs: Dict[str, Tuple[hk.Module]],
+                        projectors: Optional[List[hk.Module]],
                         return_hints: bool,
                         return_all_outputs: bool,
                         is_graph_fts_avail: bool,
+                        algorithm_index: int = 0,
                         ):
     if self.decode_hints and not first_step:
       assert self._hint_repred_mode in ['soft', 'hard', 'hard_on_eval']
@@ -176,7 +182,7 @@ class Net(hk.Module):
     hiddens, output_preds_cand, hint_preds, lstm_state = self._one_step_pred(
         inputs, cur_hint, mp_state.hiddens,
         batch_size, nb_nodes, mp_state.lstm_state,
-        spec, encs, decs, repred, is_graph_fts_avail)
+        spec, encs, decs, projectors, repred, is_graph_fts_avail, algorithm_index=algorithm_index)
 
     if first_step:
       output_preds = output_preds_cand
@@ -243,7 +249,8 @@ class Net(hk.Module):
       is_graph_fts_avail = [is_graph_fts_avail]
     assert len(algorithm_indices) == len(features_list)
 
-    self.encoders, self.decoders = self._construct_encoders_decoders()
+    # Note: here we create encoders, decoders, the processor
+    self.encoders, self.decoders, self.projectors = self._construct_encoders_decoders()
     self.processor = self.processor_factory(
         self.hidden_dim,
         num_layers=self.num_layers,
@@ -284,8 +291,7 @@ class Net(hk.Module):
           hint_preds=None, output_preds=None,
           hiddens=hiddens, lstm_state=lstm_state)
 
-      # Do the first step outside of the scan because it has a different
-      # computation graph.
+      # Do the first step outside of the scan because it has a different computation graph.
       common_args = dict(
           hints=hints,
           repred=repred,
@@ -296,10 +302,13 @@ class Net(hk.Module):
           spec=self.spec[algorithm_index],
           encs=self.encoders[algorithm_index],
           decs=self.decoders[algorithm_index],
+          projectors=self.projectors[algorithm_index], # None if not use_projection
           return_hints=return_hints,
           return_all_outputs=return_all_outputs,
           is_graph_fts_avail=graph_fts_avail,
+          algorithm_index=algorithm_index
           )
+      # Note: for every message passing step, it outputs the prediction for the next hints and the output (which may be discarded because we only keep the last output prediction)
       mp_state, lean_mp_state = self._msg_passing_step(
           mp_state,
           i=0,
@@ -312,6 +321,7 @@ class Net(hk.Module):
           first_step=False,
           **common_args)
 
+      # Note: apply the message passing multiple steps 
       output_mp_state, accum_mp_state = hk.scan(
           scan_fn,
           mp_state,
@@ -322,9 +332,10 @@ class Net(hk.Module):
     # the output only matters when a single algorithm is processed; the case
     # `algorithm_index==-1` (meaning all algorithms should be processed)
     # is used only to init parameters.
+    # Note: each forward pass, only one algorithm is processed
     accum_mp_state = jax.tree_util.tree_map(
         lambda init, tail: jnp.concatenate([init[None], tail], axis=0),
-        lean_mp_state, accum_mp_state)
+        lean_mp_state, accum_mp_state) # Note: concatentate the first step and the rest
 
     def invert(d):
       """Dict of lists -> list of dicts."""
@@ -344,6 +355,7 @@ class Net(hk.Module):
     """Constructs encoders and decoders, separate for each algorithm."""
     encoders_ = []
     decoders_ = []
+    projectors_ = []
     enc_algo_idx = None
     for (algo_idx, spec) in enumerate(self.spec):
       enc = {}
@@ -367,13 +379,18 @@ class Net(hk.Module):
             stage == _Stage.HINT and self.decode_hints):
           # Build output decoders.
           dec[name] = decoders.construct_decoders(
-              loc, t, hidden_dim=self.hidden_dim,
+              loc, t, hidden_dim=(self.hidden_dim if not self.use_projection else self.projection_dim),
               nb_dims=self.nb_dims[algo_idx][name],
               name=f'algo_{algo_idx}_{name}')
       encoders_.append(enc)
       decoders_.append(dec)
+      if self.use_projection:
+        projectors_.append(decoders.contruct_projectors(self.projection_dim,
+                                                        name = f'algo_{algo_idx}_projector'))
+      else:
+        projectors_.append(None)
 
-    return encoders_, decoders_
+    return encoders_, decoders_, projectors_
 
   def _one_step_pred(
       self,
@@ -386,8 +403,10 @@ class Net(hk.Module):
       spec: _Spec,
       encs: Dict[str, List[hk.Module]],
       decs: Dict[str, Tuple[hk.Module]],
+      projectors: Optional[List[hk.Module]],
       repred: bool,
       is_graph_fts: bool,
+      algorithm_index: int,
   ):
     """Generates one-step predictions."""
 
@@ -412,13 +431,13 @@ class Net(hk.Module):
           adj_mat = encoders.accum_adj_mat(dp, adj_mat)
           encoder = encs[dp.name]
           edge_fts = encoders.accum_edge_fts(encoder, dp, edge_fts)
-          node_fts = encoders.accum_node_fts(encoder, dp, node_fts)
+          node_fts = encoders.accum_node_fts(encoder, dp, node_fts) # Note: sum over the node features of different encodings
           graph_fts = encoders.accum_graph_fts(encoder, dp, graph_fts)
         except Exception as e:
           raise Exception(f'Failed to process {dp}') from e
 
     # PROCESS ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    nxt_hidden = hidden
+    nxt_hidden = hidden # Note: initialize as zeros
     for _ in range(self.nb_msg_passing_steps):
       nxt_hidden, nxt_edge = self.processor(
           node_fts,
@@ -431,6 +450,7 @@ class Net(hk.Module):
           repred=repred,
           readout=self.node_readout,
           is_graph_fts_avail=is_graph_fts,
+          algorithm_index=algorithm_index,
       )
 
     if not repred:      # dropout only on training
@@ -443,14 +463,19 @@ class Net(hk.Module):
     else:
       nxt_lstm_state = None
 
-    h_t = jnp.concatenate([node_fts, hidden, nxt_hidden], axis=-1)
+    h_t = jnp.concatenate([node_fts, hidden, nxt_hidden], axis=-1) # Note: 3 * hidden_dim
     if nxt_edge is not None:
-      e_t = jnp.concatenate([edge_fts, nxt_edge], axis=-1)
+      e_t = jnp.concatenate([edge_fts, nxt_edge], axis=-1) # Note: 2 * hidden_dim
     else:
       e_t = edge_fts
 
     # DECODE ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Decode features and (optionally) hints.
+    # TODO: add a projection to node features (h_t), edge features (e_t) and graph features (graph_fts)
+    if self.use_projection:
+      h_t = projectors[0](h_t)
+      e_t = projectors[1](e_t)
+      graph_fts = projectors[2](graph_fts) # project no matter if graph_fts is available or not
     hint_preds, output_preds = decoders.decode_fts(
         decoders=decs,
         spec=spec,
