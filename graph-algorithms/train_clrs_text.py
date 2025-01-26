@@ -173,6 +173,9 @@ def initialize_model(args):
         model = get_peft_model(model, config)
         model.print_trainable_parameters()
 
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
     return model, tokenizer, hf_key, model_type, append_eos
 
 
@@ -243,9 +246,6 @@ if __name__ == "__main__":
     metrics = {}
     for run in range(args.runs):
         model, tokenizer, hf_key, model_type, append_eos = initialize_model(args)
-
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
 
         batch_size = args.batch_size
         if args.inference_batch_size is None:
@@ -353,7 +353,9 @@ if __name__ == "__main__":
         start_time = time.time()
             
         if args.epochs > 0:
-            if args.use_qadapter or args.use_qlora or args.use_3bit or args.use_2bit:                         
+            if args.train_lora or args.train_adapter or \
+                args.use_qadapter or args.use_qlora or \
+                args.use_3bit or args.use_2bit:                         
                 model, tokenizer, hf_key, model_type, append_eos = initialize_model(args)
                 model.load_state_dict(state_dict, strict=False)
                 lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
@@ -362,7 +364,9 @@ if __name__ == "__main__":
                 if args.use_3bit or args.use_2bit:
                     trainer.validate_loop.trainer_fn = TrainerFn.FITTING
                     trainer.validate_loop.inference_mode = False
-                summary = trainer.validate(lm, datamodule=data_module)[0]
+                summary = trainer.validate(lm, dataloaders=data_module.test_dataloader())[0]
+                summary = {f"test_{key}": val for key, val in summary.items()}
+                summary.update(trainer.validate(lm, dataloaders=data_module.val_dataloader())[0])
             else:
                 summary = trainer.validate(lm, datamodule=data_module, ckpt_path=checkpoint_callback.best_model_path)[0]
             logging.info(summary)
