@@ -1,26 +1,39 @@
-python train_clrs_text.py --task_names 'bfs' \
-    --model_key "meta-llama/Llama-3.1-8B" \
-    --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 3800 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
-    --save_name prompt_5 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
-    --few_shot_k 5 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
+# python train_clrs_text.py --task_names 'bfs' \
+#     --model_key "meta-llama/Llama-3.1-8B" \
+#     --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 3800 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
+#     --save_name prompt_5 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
+#     --few_shot_k 5 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
 
-python train_clrs_text.py --task_names 'bfs' \
-    --model_key "meta-llama/Llama-3.1-8B" \
-    --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 6900 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
-    --save_name prompt_10 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
-    --few_shot_k 10 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
+# python train_clrs_text.py --task_names 'bfs' \
+#     --model_key "meta-llama/Llama-3.1-8B" \
+#     --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 6900 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
+#     --save_name prompt_10 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
+#     --few_shot_k 10 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
 
-python train_clrs_text.py --task_names 'bellman_ford' \
-    --model_key "meta-llama/Llama-3.1-8B" \
-    --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 4800 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
-    --save_name prompt_5 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
-    --few_shot_k 5 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
+# python train_clrs_text.py --task_names 'bellman_ford' \
+#     --model_key "meta-llama/Llama-3.1-8B" \
+#     --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 4800 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
+#     --save_name prompt_5 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
+#     --few_shot_k 5 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
 
 python train_clrs_text.py --task_names 'bellman_ford' \
     --model_key "meta-llama/Llama-3.1-8B" \
     --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 8600 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
     --save_name prompt_10 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
     --few_shot_k 10 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
+
+python train_clrs_text.py --task_names 'bfs' \
+    --model_key "meta-llama/Llama-3.1-8B" \
+    --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 13200 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
+    --save_name prompt_20 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
+    --few_shot_k 20 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
+
+python train_clrs_text.py --task_names 'bellman_ford' \
+    --model_key "meta-llama/Llama-3.1-8B" \
+    --devices 1 --batch_size 1 --inference_batch_size 1 --max_length 16300 --max_output_length 256 --generate_output --runs 1 --lr 5e-5 \
+    --save_name prompt_20 --epochs 0 --precision "bf16-true" --train_lora --lora_rank 16 --lora_alpha 128 --use_qlora \
+    --few_shot_k 20 --only_evaluate_test_set --train_lengths 15 --test_lengths 15
+
 
 # for task in 'bfs' "dfs" "topological_sort" "articulation_points" "mst_kruskal" "mst_prim" "dijkstra" "bellman_ford" 'dag_shortest_paths' "floyd_warshall"
 # do
