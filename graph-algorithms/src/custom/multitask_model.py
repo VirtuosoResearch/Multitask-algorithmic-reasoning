@@ -88,6 +88,8 @@ class MultitaskModel(pl.LightningModule):
             "attention_mask": batch["attention_mask"],
             "labels": batch["labels"],
         }
+        if "graph_data" in batch:
+            kwargs["graph_data"] = batch["graph_data"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
         
@@ -142,6 +144,8 @@ class MultitaskModel(pl.LightningModule):
             "attention_mask": batch["attention_mask"],
             "labels": batch["labels"],
         }
+        if "graph_data" in batch:
+            kwargs["graph_data"] = batch["graph_data"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
         forward_output = self.model(**kwargs)
@@ -212,6 +216,8 @@ class MultitaskModel(pl.LightningModule):
             "attention_mask": batch["attention_mask"],
             "labels": batch["labels"],
         }
+        if "graph_data" in batch:
+            kwargs["graph_data"] = batch["graph_data"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
         forward_output = self.model(**kwargs)
@@ -373,6 +379,8 @@ class MultitaskModel(pl.LightningModule):
             "attention_mask": batch["attention_mask"],
             "labels": batch["labels"],
         }
+        if "graph_data" in batch:
+            kwargs["graph_data"] = batch["graph_data"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
         outputs = self.model(**kwargs)

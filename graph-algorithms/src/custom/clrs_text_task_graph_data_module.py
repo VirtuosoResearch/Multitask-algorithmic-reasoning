@@ -6,11 +6,63 @@ from transformers.data.data_collator import *
 from torch.utils.data import BatchSampler
 
 from src.utils.multitask_dataset import MultitaskDataset, MultitaskBatchSampler, MultitaskCollator
-from custom.glue_task_constants import task_to_benchmark, task_to_instruction_template, task_is_generative_task
 from datasets import load_dataset
 
 import torch
 import numpy as np
+import networkx as nx
+from torch_geometric.data import Data, Batch
+
+def to_torch(value):
+    if isinstance(value, np.ndarray):
+        return torch.from_numpy(value)
+    elif isinstance(value, torch.Tensor):
+        return value
+    else:
+        return torch.tensor(value)
+    
+def convert_strA_to_adj(str_A):
+    A = np.array([list(map(float, row.strip(' []').split())) for row in str_A.split(',') if row])
+    return A
+
+def to_data(input_str):
+    data_dict = {}
+    input_attributes = []
+    
+    # first get the edge index; create a fully connected graph 
+    A_start = input_str.index('A: ')
+    A_end = input_str.index(', initial_trace: ')
+    str_A = input_str[A_start + 3: A_end] 
+    A = convert_strA_to_adj(str_A)
+    graph = nx.from_numpy_array(A, create_using=nx.DiGraph())
+    edge_list = np.array(list(graph.edges())).T
+    data_dict['edge_index'] = torch.tensor(edge_list, dtype=torch.long) # np.concatenate([edge_list, edge_list[::-1]], axis=1)
+    num_nodes = A.shape[0]
+
+    # add self loops
+    unique_values = np.unique(A)
+    is_weighted = unique_values.size != 2 or not np.all(unique_values == np.array([0,1]))
+    if is_weighted:
+        data_dict["weights"] = (A + np.eye(A.shape[0]))[data_dict["edge_index"][0], data_dict["edge_index"][1]]
+
+    # Parse inputs
+    additional_attributes = ['\ns:', ]
+    for attribute in additional_attributes:
+        if attribute in input_str:
+            start = input_str.index(attribute)
+            end = input_str.index('A:')
+            value = int(input_str[start + len(attribute):end].strip(' ,'))
+            feature = torch.zeros(num_nodes); feature[value] = 1
+            input_attributes.append(attribute.strip('\n:'))
+            data_dict[attribute.strip('\n:')] = feature
+    
+    data_dict['pos'] = torch.arange(0, 1, 1/num_nodes, dtype=torch.float)
+    input_attributes.append('pos')
+    
+    data_dict = {k: to_torch(v) for k,v in data_dict.items()}
+    data = Data(**data_dict)    
+    data.inputs = input_attributes
+    return data
 
 @dataclass
 class CasualLMInstructionCollator:
@@ -21,6 +73,7 @@ class CasualLMInstructionCollator:
     pad_to_multiple_of: Optional[int] = None 
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
+    special_token_for_graphs = "<|reserved_special_token_0|>" # id: 128002
 
     def __call__(self, batch, return_tensors=None):
 
@@ -29,12 +82,17 @@ class CasualLMInstructionCollator:
 
         converted_batch = batch
 
+        # convert the input to graphs
+        batch_graphs = []; graph_sizes = []
+        for instance in converted_batch:
+            batch_graphs.append(to_data(instance["input"]))
+            graph_sizes.append(len(batch_graphs[-1].pos))
+
         # prepare input sources
         sources = []; source_lengths = []
-        for instance in converted_batch:
-            source = instance["input"]
-            source = source.replace("\n", " ")
-            source = " ".join(source.split())
+        for idx, instance in enumerate(converted_batch):
+            # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text around it
+            source = "".join([self.special_token_for_graphs]*graph_sizes[idx])
             tokenized_source = self.tokenizer(source)["input_ids"]
             if len(tokenized_source) <= self.max_source_length:
                 sources.append(source)
@@ -68,7 +126,12 @@ class CasualLMInstructionCollator:
         label_mask = model_inputs["attention_mask"].clone().bool()
         model_inputs["labels"] = model_inputs["labels"].masked_fill(~label_mask, self.label_pad_token_id)
         for i, length in enumerate(source_lengths):
-            model_inputs["labels"][i, :length] = self.label_pad_token_id            
+            model_inputs["labels"][i, :length] = self.label_pad_token_id    
+
+        # Add the graph data
+        batch_graphs = Batch.from_data_list(batch_graphs)
+        batch_graphs.inputs = batch_graphs.inputs[0]
+        model_inputs["graph_data"] = batch_graphs        
 
         if "weights" in converted_batch[0]:
             model_inputs["weights"] = torch.Tensor([instance["weights"] for instance in converted_batch])
@@ -120,7 +183,7 @@ class convert_few_shot_format:
             examples["output"].append(examples["answer"][i])
         return examples
 
-class TextCLRSDataModule(pl.LightningDataModule):
+class TextGraphCLRSDataModule(pl.LightningDataModule):
     
     def __init__(
         self,
