@@ -185,7 +185,7 @@ class TextCLRSDataModule(pl.LightningDataModule):
             # convert the input and output format
             train_dataset = train_dataset.map(convert_format(), batched=True) # remove_columns=column_names
             # split dataset
-            tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split)
+            tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split, seed=42)
             train_dataset = tmp_datasets['train']
             eval_dataset = tmp_datasets['test']
             

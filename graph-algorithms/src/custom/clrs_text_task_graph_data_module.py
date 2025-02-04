@@ -25,7 +25,13 @@ def convert_strA_to_adj(str_A):
     A = np.array([list(map(float, row.strip(' []').split())) for row in str_A.split(',') if row])
     return A
 
-def to_data(input_str):
+def to_node_labels(output_str):
+    output = output_str.split("|")[1] if "|" in output_str else output_str
+    output = output.strip(" []\n").split(" ")
+    output = to_torch(np.array([int(o) for o in output]))
+    return output
+
+def to_data(input_str, output_str):
     data_dict = {}
     input_attributes = []
     
@@ -58,6 +64,9 @@ def to_data(input_str):
     
     data_dict['pos'] = torch.arange(0, 1, 1/num_nodes, dtype=torch.float)
     input_attributes.append('pos')
+
+    # Parse outputs
+    data_dict["y"] = to_node_labels(output_str)
     
     data_dict = {k: to_torch(v) for k,v in data_dict.items()}
     data = Data(**data_dict)    
@@ -85,14 +94,17 @@ class CasualLMInstructionCollator:
         # convert the input to graphs
         batch_graphs = []; graph_sizes = []
         for instance in converted_batch:
-            batch_graphs.append(to_data(instance["input"]))
+            batch_graphs.append(to_data(instance["input"], instance["output"]))
             graph_sizes.append(len(batch_graphs[-1].pos))
 
         # prepare input sources
         sources = []; source_lengths = []
         for idx, instance in enumerate(converted_batch):
-            # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text around it
-            source = "".join([self.special_token_for_graphs]*graph_sizes[idx])
+            # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text instruction
+            # initial_trace_idx = instance["input"].index(", initial_trace: ")
+            source = "Node features: "
+            source += "".join([self.special_token_for_graphs]*graph_sizes[idx]) 
+            source += " Predict: "
             tokenized_source = self.tokenizer(source)["input_ids"]
             if len(tokenized_source) <= self.max_source_length:
                 sources.append(source)
@@ -155,9 +167,15 @@ class add_length:
 
 class convert_format:
 
+    def __init__(self, load_only_last_output=False):
+        self.load_only_last_output = load_only_last_output
+
     def __call__(self, examples):
         examples["input"] = examples["question"][:]
         examples["output"] = examples["answer"][:]
+        if self.load_only_last_output:
+            examples["output"] = [output.split("|")[-1] for output in examples["output"]]
+            examples["output"] = [output.strip() for output in examples["output"]]
         return examples
     
 class convert_few_shot_format:
@@ -203,7 +221,8 @@ class TextGraphCLRSDataModule(pl.LightningDataModule):
         minimum_samples_validation=100,
         downsample_seed=0,
         use_few_shot=False,
-        few_shot_k=5
+        few_shot_k=5,
+        load_only_last_output=False
     ):
         super().__init__()
 
@@ -229,6 +248,7 @@ class TextGraphCLRSDataModule(pl.LightningDataModule):
         self.minimum_sample_validation = minimum_samples_validation
         self.use_few_shot = use_few_shot
         self.few_shot_k = few_shot_k
+        self.load_only_last_output = load_only_last_output
 
     def setup(self, stage=None):
         self.task_to_train_datasets = {}
@@ -246,9 +266,9 @@ class TextGraphCLRSDataModule(pl.LightningDataModule):
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
             # convert the input and output format
-            train_dataset = train_dataset.map(convert_format(), batched=True) # remove_columns=column_names
+            train_dataset = train_dataset.map(convert_format(load_only_last_output=self.load_only_last_output), batched=True) # remove_columns=column_names
             # split dataset
-            tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split)
+            tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split, seed=42)
             train_dataset = tmp_datasets['train']
             eval_dataset = tmp_datasets['test']
             
@@ -261,7 +281,7 @@ class TextGraphCLRSDataModule(pl.LightningDataModule):
             if self.use_few_shot:
                 predict_dataset = predict_dataset.map(convert_few_shot_format(train_dataset, k=self.few_shot_k), batched=True)
             else:
-                predict_dataset = predict_dataset.map(convert_format(), batched=True)
+                predict_dataset = predict_dataset.map(convert_format(load_only_last_output=self.load_only_last_output), batched=True)
 
             # Downsample the dataset if needed
             if self.downsample_rate < 1.0:

@@ -70,10 +70,10 @@ class Encoder(nn.Module):
                 # continue
                 self.encoder[k] = _ENCODER_MAP[(loc, type_)](1, hidden_dim)
             elif stage == 'hint':
-                logger.debug(f'Ignoring hint encoder for {k}')
+                # logger.debug(f'Ignoring hint encoder for {k}')
                 continue
             elif stage == 'output':
-                logger.debug(f'Ignoring output encoder for {k}')
+                # logger.debug(f'Ignoring output encoder for {k}')
                 continue
             else:
                 # Input DIM currently hardcoded to 1
@@ -85,7 +85,7 @@ class Encoder(nn.Module):
             stage, loc, type_, cat_dim = self.specs[key]
             if key == "randomness":
                 continue
-            logger.debug(f"Encoding {key}")
+            # logger.debug(f"Encoding {key}")
             if type_ == 'pointer':
                 continue
             if loc == 'edge':
@@ -98,7 +98,7 @@ class Encoder(nn.Module):
                 encoding = self.encoder[key](batch[key])
                 # check of nan
                 if torch.isnan(encoding).any():
-                    logger.warning(f"NaN in encoded hidden state")
+                    # logger.warning(f"NaN in encoded hidden state")
                     raise NaNException(f"NaN in encoded hidden state")
                 if hidden is None:
                     hidden = encoding

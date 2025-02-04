@@ -162,23 +162,42 @@ class MultitaskModel(pl.LightningModule):
             gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
             output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
 
-            if self.generate_output:
+            generate_output = self.generate_output
+            if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
+                generate_output = False
+            if generate_output:
                 # Remove labels in inputs_ids
                 is_label_mask = batch["labels"] != -100
                 batch["input_ids"][is_label_mask] = self.tokenizer.pad_token_id
                 is_input_mask = batch["input_ids"] != self.tokenizer.pad_token_id
                 batch["attention_mask"][is_label_mask] = 0
 
-                # convert to left padding
-                inputs = self.tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
-                self.tokenizer.padding_side = 'left'
-                inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
-                self.tokenizer.padding_side = 'right'
-                inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
+                if "graph_data" in batch:
+                    # convert to left padding
+                    new_input_ids = []
+                    for tmp_input_ids in batch["input_ids"]:
+                        tmp_input_ids = tmp_input_ids[tmp_input_ids != self.tokenizer.pad_token_id]
+                        new_input_ids.append(tmp_input_ids)
+                    new_input_ids = torch.stack(new_input_ids)
+                    inputs = self.tokenizer.batch_decode(new_input_ids, skip_special_tokens=False)
+                    self.tokenizer.padding_side = 'left'
+                    inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
+                    self.tokenizer.padding_side = 'right'
+                    inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-                output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
-                                            pad_token_id=self.tokenizer.pad_token_id,
-                                            eos_token_id=self.tokenizer.eos_token_id).detach()
+                    output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length,
+                                                pad_token_id=self.tokenizer.pad_token_id,
+                                                eos_token_id=self.tokenizer.eos_token_id).detach()
+                else:
+                    # convert to left padding
+                    inputs = self.tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
+                    self.tokenizer.padding_side = 'left'
+                    inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
+                    self.tokenizer.padding_side = 'right'
+                    inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
+                    output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
+                                                pad_token_id=self.tokenizer.pad_token_id,
+                                                eos_token_id=self.tokenizer.eos_token_id).detach()
                 input_len = inputs["input_ids"].shape[1]
                 output[:, :input_len] = self.tokenizer.pad_token_id
                 if not self.evaluate_cot:
@@ -194,6 +213,8 @@ class MultitaskModel(pl.LightningModule):
             "answers": gold_answers,
             "generates": output,
         }
+        if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
+            output_dict.update({"graph_accuracy": forward_output.graph_accuracy})
         self.validation_step_outputs.append(output_dict)
         return output_dict
     
@@ -268,23 +289,42 @@ class MultitaskModel(pl.LightningModule):
         gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
         output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
         
-        if self.generate_output:
+        generate_output = self.generate_output
+        if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
+                generate_output = False
+        if generate_output:
             # Remove labels in inputs_ids
             is_label_mask = batch["labels"] != -100
             batch["input_ids"][is_label_mask] = self.tokenizer.pad_token_id
             is_input_mask = batch["input_ids"] != self.tokenizer.pad_token_id
             batch["attention_mask"][is_label_mask] = 0
 
-            # convert to left padding
-            inputs = self.tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
-            self.tokenizer.padding_side = 'left'
-            inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
-            self.tokenizer.padding_side = 'right'
-            inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
+            if "graph_data" in batch:
+                # convert to left padding
+                new_input_ids = []
+                for tmp_input_ids in batch["input_ids"]:
+                    tmp_input_ids = tmp_input_ids[tmp_input_ids != self.tokenizer.pad_token_id]
+                    new_input_ids.append(tmp_input_ids)
+                new_input_ids = torch.stack(new_input_ids)
+                inputs = self.tokenizer.batch_decode(new_input_ids, skip_special_tokens=False)
+                self.tokenizer.padding_side = 'left'
+                inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
+                self.tokenizer.padding_side = 'right'
+                inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-            output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
-                                        pad_token_id=self.tokenizer.pad_token_id,
-                                        eos_token_id=self.tokenizer.eos_token_id).detach()
+                output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length,
+                                            pad_token_id=self.tokenizer.pad_token_id,
+                                            eos_token_id=self.tokenizer.eos_token_id).detach()
+            else:
+                # convert to left padding
+                inputs = self.tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
+                self.tokenizer.padding_side = 'left'
+                inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
+                self.tokenizer.padding_side = 'right'
+                inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
+                output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
+                                            pad_token_id=self.tokenizer.pad_token_id,
+                                            eos_token_id=self.tokenizer.eos_token_id).detach()
             input_len = inputs["input_ids"].shape[1]
             output[:, :input_len] = self.tokenizer.pad_token_id
             if not self.evaluate_cot:
@@ -297,6 +337,8 @@ class MultitaskModel(pl.LightningModule):
             "answers": gold_answers,
             "generates": output,
         }
+        if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
+            output_dict.update({"graph_accuracy": forward_output.graph_accuracy})
         if "weights" in batch:
             output_dict.update({"weights": batch["weights"]})
         return output_dict
@@ -319,43 +361,59 @@ class MultitaskModel(pl.LightningModule):
         losses = losses[torch.isnan(losses) == False]
         summary.update({"loss": losses.mean().item()})
 
-        task_counts = {task_name: 0 for task_name in self.task_names}
-        for step, batch in enumerate(outputs):
-            task_name = batch["task_name"]
-            if len(batch["answers"]) == 0:
-                continue
-            summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["answers"]) if torch.isnan(batch["loss"]) == False else 0
+        generate_output = self.generate_output
+        if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
+            generate_output = False
 
-            pred_answers = self.tokenizer.batch_decode(batch['generates'], skip_special_tokens=True)
-            gold_answers = self.tokenizer.batch_decode(batch['answers'], skip_special_tokens=True)
-            if step == 0:
-                print("gold_answers", gold_answers[:4])
-                print("pred_answers", pred_answers[:4])
-            if self.evaluate_cot:
-                # remove the steps and only keeps the answers
-                for i, answer in enumerate(pred_answers):
-                    if "Answer:" in answer:
-                        answer = answer[answer.index("Answer:")+7:]
-                        pred_answers[i] = answer
-                    else:
-                        pred_answers[i] = answer
-                for i, answer in enumerate(gold_answers):
-                    if "Answer:" in answer:
-                        answer = answer[answer.index("Answer:")+7:]
-                        gold_answers[i] = answer
-                    else:
-                        gold_answers[i] = answer
-            gold_answers = [[answer] for answer in gold_answers]
-            metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
-            summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
-            summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
-            task_counts[task_name] += len(batch["answers"])
-        
-        for task_name in self.task_names:
-            if task_counts[task_name] > 0:
-                summary[f"{task_name}_loss"] /= task_counts[task_name]
-                summary[f"{task_name}_accuracy"] /= task_counts[task_name]
-                summary[f"{task_name}_edit_distance"] /= task_counts[task_name]
+            task_counts = {task_name: 0 for task_name in self.task_names}
+            for step, batch in enumerate(outputs):
+                task_name = batch["task_name"]
+                summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["answers"]) if torch.isnan(batch["loss"]) == False else 0
+                summary[f"{task_name}_accuracy"] += batch["graph_accuracy"]*len(batch["answers"])
+                task_counts[task_name] += len(batch["answers"])
+            
+            for task_name in self.task_names:
+                if task_counts[task_name] > 0:
+                    summary[f"{task_name}_loss"] /= task_counts[task_name]
+                    summary[f"{task_name}_accuracy"] /= task_counts[task_name]
+        if generate_output:
+            task_counts = {task_name: 0 for task_name in self.task_names}
+            for step, batch in enumerate(outputs):
+                task_name = batch["task_name"]
+                if len(batch["answers"]) == 0:
+                    continue
+                summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["answers"]) if torch.isnan(batch["loss"]) == False else 0
+
+                pred_answers = self.tokenizer.batch_decode(batch['generates'], skip_special_tokens=True)
+                gold_answers = self.tokenizer.batch_decode(batch['answers'], skip_special_tokens=True)
+                if step == 0:
+                    print("gold_answers", gold_answers[:4])
+                    print("pred_answers", pred_answers[:4])
+                if self.evaluate_cot:
+                    # remove the steps and only keeps the answers
+                    for i, answer in enumerate(pred_answers):
+                        if "Answer:" in answer:
+                            answer = answer[answer.index("Answer:")+7:]
+                            pred_answers[i] = answer
+                        else:
+                            pred_answers[i] = answer
+                    for i, answer in enumerate(gold_answers):
+                        if "Answer:" in answer:
+                            answer = answer[answer.index("Answer:")+7:]
+                            gold_answers[i] = answer
+                        else:
+                            gold_answers[i] = answer
+                gold_answers = [[answer] for answer in gold_answers]
+                metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
+                summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
+                summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
+                task_counts[task_name] += len(batch["answers"])
+            
+            for task_name in self.task_names:
+                if task_counts[task_name] > 0:
+                    summary[f"{task_name}_loss"] /= task_counts[task_name]
+                    summary[f"{task_name}_accuracy"] /= task_counts[task_name]
+                    summary[f"{task_name}_edit_distance"] /= task_counts[task_name]
 
         # average accuracy and f1 score
         summary.update({"accuracy": np.mean([summary[f"{task_name}_accuracy"] for task_name in self.task_names])})

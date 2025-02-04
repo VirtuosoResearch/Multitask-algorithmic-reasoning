@@ -37,7 +37,58 @@ import glob
 # DEFAULT_G_END_TOKEN = "<g_end>"
 DEFAULT_GRAPH_PATCH_TOKEN = 128002 # "<|reserved_special_token_0|>"
 
-
+num_to_token = {
+0 : 15 ,
+1 : 16 ,
+2 : 17 ,
+3 : 18 ,
+4 : 19 ,
+5 : 20 ,
+6 : 21 ,
+7 : 22 ,
+8 : 23 ,
+9 : 24 ,
+10 : 605 ,
+11 : 806 ,
+12 : 717 ,
+13 : 1032 ,
+14 : 975 ,
+15 : 868 ,
+16 : 845 ,
+17 : 1114 ,
+18 : 972 ,
+19 : 777 ,
+20 : 508 ,
+21 : 1691 ,
+22 : 1313 ,
+23 : 1419 ,
+24 : 1187 ,
+25 : 914 ,
+26 : 1627 ,
+27 : 1544 ,
+28 : 1591 ,
+29 : 1682 ,
+30 : 966 ,
+31 : 2148 ,
+32 : 843 ,
+33 : 1644 ,
+34 : 1958 ,
+35 : 1758 ,
+36 : 1927 ,
+37 : 1806 ,
+38 : 1987 ,
+39 : 2137 ,
+40 : 1272 ,
+41 : 3174 ,
+42 : 2983 ,
+43 : 3391 ,
+44 : 2096 ,
+45 : 1774 ,
+46 : 2790 ,
+47 : 2618 ,
+48 : 2166 ,
+49 : 2491 ,
+}
 
 
 class GraphLlamaConfig(LlamaConfig):
@@ -74,6 +125,53 @@ def transfer_param_tograph(clip_graph, gnn):
     gnn.load_state_dict(gnn_state_dict)
     return gnn
 
+class CrossAttention(nn.Module):
+    def __init__(self, embed_dim, num_heads=1, dropout=0.1, add_output_projection=False):
+        super(CrossAttention, self).__init__()
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        
+        assert self.head_dim * num_heads == embed_dim, "Embedding dimension must be divisible by number of heads"
+        
+        self.query_proj = nn.Linear(embed_dim, embed_dim)
+        self.key_proj = nn.Linear(embed_dim, embed_dim)
+        self.add_output_projection = add_output_projection
+        if add_output_projection:
+            self.value_proj = nn.Linear(embed_dim, embed_dim)
+            self.out_proj = nn.Linear(embed_dim, embed_dim)
+        
+        self.dropout = nn.Dropout(dropout)
+        
+    def forward(self, query_seq, key_seq, value_seq, mask=None):
+        batch_size, query_len, _ = query_seq.shape
+        _, key_len, _ = key_seq.shape
+        _, value_len, _ = value_seq.shape
+        assert value_len == key_len, "Key and value sequences must have the same length"
+        
+        # Linear projections
+        queries = self.query_proj(query_seq).view(batch_size, query_len, self.num_heads, self.head_dim).transpose(1, 2)
+        keys = self.key_proj(key_seq).view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
+        if self.add_output_projection:
+            values = self.value_proj(value_seq).view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
+        else:
+            values = value_seq.view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
+        
+        # Scaled dot-product attention
+        scores = torch.matmul(queries, keys.transpose(-2, -1)) / (self.head_dim ** 0.5)
+        if mask is not None:
+            scores = scores.masked_fill(mask == 0, float('-inf'))
+        
+        attn_weights = F.softmax(scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+        
+        output = torch.matmul(attn_weights, values)
+        output = output.transpose(1, 2).contiguous().view(batch_size, query_len, self.embed_dim)
+        
+        if self.add_output_projection:
+            output = self.out_proj(output)
+        return output
+
 class GraphLlamaModel(LlamaModel):
     config_class = GraphLlamaConfig
 
@@ -96,7 +194,9 @@ class GraphLlamaModel(LlamaModel):
             graph_tower = graph_tower[0]
         return graph_tower
 
-    def initialize_graph_modules(self, graph_tower, specs, cfg, # params for CLRS GNN encoder
+    def initialize_graph_modules(self, graph_tower, specs, cfg, use_cross_attn=True, 
+                                 num_soft_prompts=15, add_output_projection=True, 
+                                 test_classifier_before_cross_attn=True, # only used for evaluating feature accuracy
                                  graph_select_layer=-1, pretrain_graph_mlp_adapter=None, fsdp=None):
         self.config.graph_tower = graph_tower
 
@@ -114,24 +214,31 @@ class GraphLlamaModel(LlamaModel):
         self.config.use_graph_proj = True
         self.config.graph_select_layer = graph_select_layer
 
-        if not hasattr(self, 'graph_projector'):
-            self.graph_projector = nn.Linear(cfg.MODEL.HIDDEN_DIM, self.config.hidden_size)
+        self.graph_projector = nn.Linear(cfg.MODEL.HIDDEN_DIM, self.config.hidden_size)
+        self.graph_classifier = nn.Linear(self.config.hidden_size, cfg.MODEL.NUM_CLASSES) # only used for evaluating feature accuracy
+        self.test_classifier_before_cross_attn = test_classifier_before_cross_attn
 
-        if pretrain_graph_mlp_adapter is not None:
-            graph_projector_weights = torch.load(pretrain_graph_mlp_adapter, map_location='cpu')
-            self.graph_projector.load_state_dict({k.split('.')[-1]: v for k, v in graph_projector_weights.items()})
+        if use_cross_attn:
+            self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
+            for i in range(num_soft_prompts):
+                self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
+
+            self.graph_token_cross_attn = CrossAttention(self.config.hidden_size, num_heads=1, dropout=0.1, add_output_projection=add_output_projection)
 
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[Union[List[torch.FloatTensor]]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
-        graph_data: Optional[Data] = None,
         return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        graph_data: Optional[Data] = None,
+        only_compute_graph_loss: Optional[bool] = False,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
 
         # HACK: replace back original embeddings for LLaVA pretraining
@@ -155,6 +262,27 @@ class GraphLlamaModel(LlamaModel):
             graph_node_features = self.graph_projector(graph_node_features)
             dummy_graph_features = self.graph_projector(dummy_graph_features)
 
+            # compute graph classification loss
+            if self.test_classifier_before_cross_attn:
+                graph_labels = graph_data.y
+                graph_node_logits = self.graph_classifier(graph_node_features)
+                graph_loss = F.cross_entropy(graph_node_logits, graph_labels)
+                graph_accuracy = (graph_node_logits.detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
+
+            if hasattr(self, 'graph_token_cross_attn') and hasattr(self, 'graph_token_embeddings'):
+                # attend graph features with token embeddings
+                graph_token_embeds = self.graph_token_embeddings.weight
+                graph_node_features = self.graph_token_cross_attn(graph_node_features.view(1, -1, self.config.hidden_size),
+                                                                    graph_token_embeds.unsqueeze(0).expand(1, -1, -1),
+                                                                    graph_token_embeds.unsqueeze(0).expand(1, -1, -1))
+                graph_node_features = graph_node_features.view(-1, self.config.hidden_size)
+            
+            if not self.test_classifier_before_cross_attn:
+                graph_labels = graph_data.y
+                graph_node_logits = self.graph_classifier(graph_node_features)
+                graph_loss = F.cross_entropy(graph_node_logits, graph_labels)
+                graph_accuracy = (graph_node_logits.detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
+
             new_input_embeds = []
             cur_graph_idx = 0
             graph_patch_token = DEFAULT_GRAPH_PATCH_TOKEN
@@ -164,7 +292,6 @@ class GraphLlamaModel(LlamaModel):
                     cur_input_embeds = cur_input_embeds + (0. * dummy_graph_features).sum()
                     new_input_embeds.append(cur_input_embeds)
                     cur_graph_idx += 1
-                    continue
                 else:
                     cur_graph_features = graph_node_features[graph_batch_ptr[cur_graph_idx]:graph_batch_ptr[cur_graph_idx+1]]
                     num_patches = cur_graph_features.shape[0]
@@ -176,18 +303,26 @@ class GraphLlamaModel(LlamaModel):
                         (cur_input_embeds[:graph_patch_tokens[0]], 
                             cur_graph_features, 
                             cur_input_embeds[graph_patch_tokens[-1] + 1:]), dim=0)
+                    # if cur_graph_idx == 0:
+                    #     print(cur_new_input_embeds[:32].abs().sum(dim=1))
                     cur_graph_idx += 1
                     new_input_embeds.append(cur_new_input_embeds)
 
             assert cur_graph_idx == len(graph_data.ptr)-1
             inputs_embeds = torch.stack(new_input_embeds, dim=0)
 
-        return super(GraphLlamaModel, self).forward(
-            input_ids=None, attention_mask=attention_mask, past_key_values=past_key_values,
-            inputs_embeds=inputs_embeds, use_cache=use_cache,
-            output_attentions=output_attentions, output_hidden_states=output_hidden_states,
-            return_dict=return_dict
-        )
+        if only_compute_graph_loss:
+            outputs = CausalLMOutputWithPast(loss=graph_loss)
+            outputs.graph_loss = graph_loss
+            outputs.graph_accuracy = graph_accuracy
+        else:
+            outputs =  super(GraphLlamaModel, self).forward(
+                input_ids=None, attention_mask=attention_mask, past_key_values=past_key_values, position_ids=position_ids,
+                inputs_embeds=inputs_embeds, use_cache=use_cache, cache_position=cache_position,
+                output_attentions=output_attentions, output_hidden_states=output_hidden_states, 
+                return_dict=return_dict
+            )
+        return outputs
 
 
 class GraphLlamaForCausalLM(LlamaForCausalLM):
@@ -214,19 +349,24 @@ class GraphLlamaForCausalLM(LlamaForCausalLM):
         if type(graph_tower) is list:
             graph_tower = graph_tower[0]
         return graph_tower
+    
+    def set_if_only_train_graph(self, only_train_graph):
+        self.only_train_graph = only_train_graph
 
     def forward(
         self,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
-        past_key_values: Optional[List[torch.FloatTensor]] = None,
+        position_ids: Optional[torch.LongTensor] = None,
+        past_key_values: Optional[Union[List[torch.FloatTensor]]] = None,
         inputs_embeds: Optional[torch.FloatTensor] = None,
         labels: Optional[torch.LongTensor] = None,
         use_cache: Optional[bool] = None,
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
-        graph_data: Optional[Data] = None,
         return_dict: Optional[bool] = None,
+        cache_position: Optional[torch.LongTensor] = None,
+        graph_data: Optional[Data] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -244,8 +384,14 @@ class GraphLlamaForCausalLM(LlamaForCausalLM):
             output_attentions=output_attentions,
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
-            graph_data = graph_data
+            graph_data = graph_data,
+            only_compute_graph_loss=self.only_train_graph,
+            position_ids=position_ids,
+            cache_position=cache_position,
         )
+
+        if self.only_train_graph:
+            return outputs
 
         hidden_states = outputs[0]
         logits = self.lm_head(hidden_states)
@@ -276,21 +422,43 @@ class GraphLlamaForCausalLM(LlamaForCausalLM):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids, past_key_values=None, attention_mask=None, inputs_embeds=None, **kwargs
+        self, input_ids,
+        past_key_values=None,
+        attention_mask=None,
+        inputs_embeds=None,
+        cache_position=None,
+        position_ids=None,
+        use_cache=True,
+        **kwargs,
     ):
-        if past_key_values:
-            input_ids = input_ids[:, -1:]
+        # If we have cache: let's slice `input_ids` through `cache_position`, to keep only the unprocessed tokens
+        # Exception 1: when passing input_embeds, input_ids may be missing entries
+        # Exception 2: some generation methods do special slicing of input_ids, so we don't need to do it here
+        if past_key_values is not None:
+            if inputs_embeds is not None:  # Exception 1
+                input_ids = input_ids[:, -cache_position.shape[0] :]
+            elif input_ids.shape[1] != cache_position.shape[0]:  # Default case (the "else", a no op, is Exception 2)
+                input_ids = input_ids[:, cache_position]
+
+        if attention_mask is not None and position_ids is None:
+            # create position_ids on the fly for batch generation
+            position_ids = attention_mask.long().cumsum(-1) - 1
+            position_ids.masked_fill_(attention_mask == 0, 1)
+            if past_key_values:
+                position_ids = position_ids[:, -input_ids.shape[1] :]
 
         # if `inputs_embeds` are passed, we only want to use them in the 1st generation step
-        if inputs_embeds is not None and past_key_values is None:
+        if inputs_embeds is not None and cache_position[0] == 0:
             model_inputs = {"inputs_embeds": inputs_embeds}
         else:
-            model_inputs = {"input_ids": input_ids}
+            model_inputs = {"input_ids": input_ids.contiguous()}  # `contiguous()` needed for compilation use cases
 
         model_inputs.update(
             {
+                "position_ids": position_ids,
+                "cache_position": cache_position,
                 "past_key_values": past_key_values,
-                "use_cache": kwargs.get("use_cache"),
+                "use_cache": use_cache,
                 "attention_mask": attention_mask,
                 "graph_data": kwargs.get("graph_data", None),
             }

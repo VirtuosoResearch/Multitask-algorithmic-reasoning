@@ -57,7 +57,8 @@ class GNN_Encoder(torch.nn.Module):
             ''' Process: one GNN layer; hidden is updated very message passing step '''
             hidden = self.processor[message_passing_step](input_hidden, hidden, last_hidden, randomness=None, edge_index=batch.edge_index, batch_assignment=batch.batch, 
                                                             **{self.edge_weight_name: self.process_weights(batch) for _ in range(1) if (hasattr(batch, 'weights') and hasattr(self, "edge_weight_name")) })
-            
+            hidden = torch.relu(hidden)
+
         return hidden
         
         # if self.training and self.cfg.TRAIN.LOSS.HINT_LOSS_WEIGHT > 0.0:

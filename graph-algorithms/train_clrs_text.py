@@ -4,7 +4,11 @@ import os
 import wandb
 
 from src.custom.clrs_text_task_data_module import TextCLRSDataModule
+from src.custom.clrs_text_task_graph_data_module import TextGraphCLRSDataModule
+
 from src.custom.multitask_model import MultitaskModel
+from src.model.GraphLlama import GraphLlamaForCausalLM
+from src.model.gnn_models.config import load_cfg
 
 from functools import partial
 from pytorch_lightning.trainer.states import RunningStage, TrainerFn
@@ -31,8 +35,6 @@ from torch._inductor.async_compile import AsyncCompile
 
 logging.basicConfig(level=logging.INFO, force=True)
 torch.set_float32_matmul_precision("high")
-
-# peft.__version__ '0.12.0'    
 
 def add_result_to_csv(result_datapoint, file_name):
     for key, val in result_datapoint.items():
@@ -62,6 +64,8 @@ def initialize_model(args):
                 bnb_4bit_quant_type='nf4'
                 )
             model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) 
+        elif args.use_graph_llama:
+            model = GraphLlamaForCausalLM.from_pretrained(hf_key)
         else:
             model = AutoModelForCausalLM.from_pretrained(hf_key, torch_dtype=torch.bfloat16)
         model_type = "decoder"
@@ -75,7 +79,32 @@ def initialize_model(args):
     else:
         raise NotImplementedError(args.model_key)
     
-    
+    if args.use_graph_llama:
+        cfg = load_cfg("./src/model/gnn_models/configs/SAGE.yml")
+        specs = np.load(f".//src/model/specs/{args.task_names[0]}_specs.npy", allow_pickle=True).item()
+
+        model.get_model().initialize_graph_modules(
+            graph_tower="SAGE",
+            specs=specs, cfg=cfg, use_cross_attn=args.use_cross_attn, 
+            num_soft_prompts=args.num_soft_prompts, add_output_projection=args.add_output_projection,
+            test_classifier_before_cross_attn=args.test_classifier_before_cross_attn
+        )
+        model.requires_grad_(False)
+        # only the graph tower is trainable
+        if not args.freeze_graph_tower:
+            for p in model.get_model().get_graph_tower().parameters():
+                p.requires_grad = True
+        for p in model.get_model().graph_projector.parameters():
+            p.requires_grad = True
+        if args.use_cross_attn:
+            if not args.freeze_embeddings:
+                for p in model.get_model().graph_token_embeddings.parameters():
+                    p.requires_grad = True
+            for p in model.get_model().graph_token_cross_attn.parameters():
+                p.requires_grad = True
+
+        model.set_if_only_train_graph(args.only_train_graph)
+
     if args.train_adapter:
         
         if args.use_qadapter:
@@ -114,9 +143,8 @@ def initialize_model(args):
 
         print(f"Trainable parameters: {trainable_params_count} || All parameters: {all_params_count} || ratio: {trainable_params_count/all_params_count}")
         print("-"*20,"Bottleneck_Adapter","-"*20)
-
     
-    if args.use_3bit or args.use_2bit:
+    elif args.use_3bit or args.use_2bit:
         ''' deprecated '''
         from src.lqlora_utils import lora_utils
         model = lora_utils.prepare_model_for_lora(
@@ -171,6 +199,20 @@ def initialize_model(args):
                 modules_to_save=[],
             )
         model = get_peft_model(model, config)
+        if args.use_graph_llama:
+            # only the graph tower is trainable
+            if not args.freeze_graph_tower:
+                for p in model.model.get_model().get_graph_tower().parameters():
+                    p.requires_grad = True
+            for p in model.model.get_model().graph_projector.parameters():
+                p.requires_grad = True
+            if args.use_cross_attn:
+                if not args.freeze_embeddings:
+                    for p in model.model.get_model().graph_token_embeddings.parameters():
+                        p.requires_grad = True
+                for p in model.model.get_model().graph_token_cross_attn.parameters():
+                    p.requires_grad = True
+
         model.print_trainable_parameters()
 
     if tokenizer.pad_token is None:
@@ -208,6 +250,20 @@ if __name__ == "__main__":
     parser.add_argument("--test_lengths", type=int, nargs="+", default=[4])
     parser.add_argument("--few_shot_k", type=int, default=0)
     parser.add_argument("--only_evaluate_test_set", action="store_true")
+    parser.add_argument("--only_load_last_output", action="store_true")
+
+    parser.add_argument("--use_graph_llama", action="store_true")
+    parser.add_argument("--only_train_graph", action="store_true") # pretraining gnn 
+    parser.add_argument("--test_classifier_before_cross_attn", action="store_true") # pretraining gnn
+    parser.add_argument("--freeze_graph_tower", action="store_true")
+    parser.add_argument("--freeze_embeddings", action="store_true")
+    parser.add_argument("--use_cross_attn", action="store_true")
+    parser.add_argument("--add_output_projection", action="store_true")
+    parser.add_argument('--num_soft_prompts', type=int, default=15)
+
+    parser.add_argument("--train_lora", action="store_true")
+    parser.add_argument("--lora_rank", type=int, default=4)
+    parser.add_argument("--lora_alpha", type=int, default=32)
 
     parser.add_argument("--train_adapter", action="store_true")
     parser.add_argument("--reduction_factor", type=int, default=128)
@@ -216,10 +272,6 @@ if __name__ == "__main__":
     parser.add_argument("--use_qlora", action="store_true")
     parser.add_argument("--use_3bit", action="store_true")
     parser.add_argument("--use_2bit", action="store_true")
-
-    parser.add_argument("--train_lora", action="store_true")
-    parser.add_argument("--lora_rank", type=int, default=4)
-    parser.add_argument("--lora_alpha", type=int, default=32)
     
     parser.add_argument("--save_name", type=str, default=None)
     parser.add_argument("--runs", type=int, default=3)
@@ -253,7 +305,8 @@ if __name__ == "__main__":
         else:
             inference_batch_size = args.inference_batch_size
         
-        data_module = TextCLRSDataModule(
+        if args.use_graph_llama:
+            data_module = TextGraphCLRSDataModule(
                 task_names=args.task_names,
                 tokenizer=tokenizer,
                 batch_size=batch_size,
@@ -268,8 +321,29 @@ if __name__ == "__main__":
                 train_lengths=args.train_lengths,
                 test_lengths=args.test_lengths,
                 use_few_shot=(args.few_shot_k > 0), 
-                few_shot_k=args.few_shot_k)
+                few_shot_k=args.few_shot_k,
+                load_only_last_output=args.only_load_last_output)
+        else:
+            data_module = TextCLRSDataModule(
+                    task_names=args.task_names,
+                    tokenizer=tokenizer,
+                    batch_size=batch_size,
+                    inference_batch_size=inference_batch_size,
+                    max_input_length=args.max_length,
+                    max_output_length=args.max_output_length,
+                    eval_all=True,
+                    eval_split=args.eval_split,
+                    downsample_ratio=args.downsample_ratio,
+                    minimum_samples=args.minimum_samples,
+                    minimum_samples_validation=args.minimum_samples_validation,
+                    train_lengths=args.train_lengths,
+                    test_lengths=args.test_lengths,
+                    use_few_shot=(args.few_shot_k > 0), 
+                    few_shot_k=args.few_shot_k)
         data_module.setup(stage="fit")
+        for name, param in model.named_parameters():
+            if param.requires_grad:
+                print(name, param.shape)
 
         extended_task_names = [f"{task_name}" for task_name in args.task_names]
         lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
@@ -285,7 +359,7 @@ if __name__ == "__main__":
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 print(f"Loaded model from {load_model_dir}")
             elif ("pt" in load_model_dir) and os.path.exists(load_model_dir):
-                model.load_state_dict(torch.load(load_model_dir), strict=False)
+                print(model.load_state_dict(torch.load(load_model_dir), strict=False))
                 print(f"Loaded model from {load_model_dir}")
 
         if not os.path.exists("external_lightning_logs"):
@@ -334,7 +408,13 @@ if __name__ == "__main__":
         start_time = time.time()
         if args.epochs > 0:
             trainer.fit(lm, datamodule=data_module)
-            if args.train_lora:
+            if args.use_graph_llama:
+                from lightning_fabric.utilities.cloud_io import _load as pl_load
+                checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
+                state_dict = checkpoint["state_dict"]
+                state_dict = {k[6:]: v for k, v in state_dict.items() if ("graph" in k or "lora" in k)}
+                torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
+            elif args.train_lora:
                 from lightning_fabric.utilities.cloud_io import _load as pl_load
                 checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
                 state_dict = checkpoint["state_dict"]
@@ -353,7 +433,7 @@ if __name__ == "__main__":
         start_time = time.time()
             
         if args.epochs > 0:
-            if args.train_lora or args.train_adapter or \
+            if args.use_graph_llama or args.train_lora or args.train_adapter or \
                 args.use_qadapter or args.use_qlora or \
                 args.use_3bit or args.use_2bit:                         
                 model, tokenizer, hf_key, model_type, append_eos = initialize_model(args)
@@ -361,9 +441,11 @@ if __name__ == "__main__":
                 lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                
                 if args.use_3bit or args.use_2bit:
                     trainer.validate_loop.trainer_fn = TrainerFn.FITTING
                     trainer.validate_loop.inference_mode = False
+                
                 summary = trainer.validate(lm, dataloaders=data_module.test_dataloader())[0]
                 summary = {f"test_{key}": val for key, val in summary.items()}
                 summary.update(trainer.validate(lm, dataloaders=data_module.val_dataloader())[0])
@@ -393,7 +475,7 @@ if __name__ == "__main__":
             metrics[key].append(summary[key])
 
         # delete the whole model checkpoint and only keep the lora parameters
-        if args.train_lora or args.train_adapter:
+        if args.use_graph_llama or args.train_lora or args.train_adapter:
             os.system(f"rm {checkpoint_callback.best_model_path}")
     
     for key in metrics:
