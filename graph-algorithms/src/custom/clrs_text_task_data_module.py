@@ -6,7 +6,6 @@ from transformers.data.data_collator import *
 from torch.utils.data import BatchSampler
 
 from src.utils.multitask_dataset import MultitaskDataset, MultitaskBatchSampler, MultitaskCollator
-from custom.glue_task_constants import task_to_benchmark, task_to_instruction_template, task_is_generative_task
 from datasets import load_dataset
 
 import torch
