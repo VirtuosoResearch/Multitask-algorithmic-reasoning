@@ -15,7 +15,6 @@ import tqdm
 import random
 
 from src.utils.multitask_dataset import MultitaskDataset, MultitaskBatchSampler, MultitaskCollator
-from custom.glue_task_constants import task_to_benchmark, task_to_instruction_template, task_is_generative_task
 from datasets import load_dataset
 
 @dataclass
@@ -197,7 +196,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             text_encoder = self.text_encoders[i]
 
             # Split the dataset into train and validation
-            task_file_dir = "./data/tasks/nodes_{}_{}/{}_{}_train.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_train.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             train_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
@@ -205,7 +204,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
 
-            task_file_dir = "./data/tasks/nodes_{}_{}/{}_{}_valid.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_valid.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = eval_dataset.column_names
@@ -213,7 +212,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
             
-            task_file_dir = "./data/tasks/nodes_{}_{}/{}_{}_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = predict_dataset.column_names
