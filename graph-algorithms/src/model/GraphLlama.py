@@ -36,6 +36,7 @@ import glob
 # DEFAULT_G_START_TOKEN = "<g_start>"
 # DEFAULT_G_END_TOKEN = "<g_end>"
 DEFAULT_GRAPH_PATCH_TOKEN = 128002 # "<|reserved_special_token_0|>"
+PADDING_TOKEN = 128001
 
 num_to_token = {
 0 : 15 ,
@@ -136,9 +137,9 @@ class CrossAttention(nn.Module):
         
         self.query_proj = nn.Linear(embed_dim, embed_dim)
         self.key_proj = nn.Linear(embed_dim, embed_dim)
+        self.value_proj = nn.Linear(embed_dim, embed_dim)
         self.add_output_projection = add_output_projection
         if add_output_projection:
-            self.value_proj = nn.Linear(embed_dim, embed_dim)
             self.out_proj = nn.Linear(embed_dim, embed_dim)
         
         self.dropout = nn.Dropout(dropout)
@@ -152,10 +153,7 @@ class CrossAttention(nn.Module):
         # Linear projections
         queries = self.query_proj(query_seq).view(batch_size, query_len, self.num_heads, self.head_dim).transpose(1, 2)
         keys = self.key_proj(key_seq).view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
-        if self.add_output_projection:
-            values = self.value_proj(value_seq).view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
-        else:
-            values = value_seq.view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
+        values = self.value_proj(value_seq).view(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
         
         # Scaled dot-product attention
         scores = torch.matmul(queries, keys.transpose(-2, -1)) / (self.head_dim ** 0.5)
@@ -195,7 +193,7 @@ class GraphLlamaModel(LlamaModel):
         return graph_tower
 
     def initialize_graph_modules(self, graph_tower, specs, cfg, use_cross_attn=True, 
-                                 num_soft_prompts=15, add_output_projection=True, 
+                                 add_output_projection=True, 
                                  test_classifier_before_cross_attn=True, # only used for evaluating feature accuracy
                                  graph_select_layer=-1, pretrain_graph_mlp_adapter=None, fsdp=None):
         self.config.graph_tower = graph_tower
@@ -219,10 +217,10 @@ class GraphLlamaModel(LlamaModel):
         self.test_classifier_before_cross_attn = test_classifier_before_cross_attn
 
         if use_cross_attn:
-            self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
-            for i in range(num_soft_prompts):
-                self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
-
+            # This is setting up pseudo token embeddings for cross attention with graph features
+            # self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
+            # for i in range(num_soft_prompts):
+            #     self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
             self.graph_token_cross_attn = CrossAttention(self.config.hidden_size, num_heads=1, dropout=0.1, add_output_projection=add_output_projection)
 
     def forward(
@@ -257,7 +255,6 @@ class GraphLlamaModel(LlamaModel):
             graph_batch_ptr = graph_data.ptr
             graph_node_features = graph_tower(graph_data)
             dummy_graph_features = torch.zeros_like(graph_node_features, device=inputs_embeds.device)
-
             # project the graph node features to the hidden size of the model
             graph_node_features = self.graph_projector(graph_node_features)
             dummy_graph_features = self.graph_projector(dummy_graph_features)
@@ -268,15 +265,8 @@ class GraphLlamaModel(LlamaModel):
                 graph_node_logits = self.graph_classifier(graph_node_features)
                 graph_loss = F.cross_entropy(graph_node_logits, graph_labels)
                 graph_accuracy = (graph_node_logits.detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
-
-            if hasattr(self, 'graph_token_cross_attn') and hasattr(self, 'graph_token_embeddings'):
-                # attend graph features with token embeddings
-                graph_token_embeds = self.graph_token_embeddings.weight
-                graph_node_features = self.graph_token_cross_attn(graph_node_features.view(1, -1, self.config.hidden_size),
-                                                                    graph_token_embeds.unsqueeze(0).expand(1, -1, -1),
-                                                                    graph_token_embeds.unsqueeze(0).expand(1, -1, -1))
-                graph_node_features = graph_node_features.view(-1, self.config.hidden_size)
             
+            # compute graph classification loss
             if not self.test_classifier_before_cross_attn:
                 graph_labels = graph_data.y
                 graph_node_logits = self.graph_classifier(graph_node_features)
@@ -295,14 +285,33 @@ class GraphLlamaModel(LlamaModel):
                 else:
                     cur_graph_features = graph_node_features[graph_batch_ptr[cur_graph_idx]:graph_batch_ptr[cur_graph_idx+1]]
                     num_patches = cur_graph_features.shape[0]
-                    
+
                     graph_patch_tokens = torch.where(cur_input_ids == graph_patch_token)[0]
                     assert len(graph_patch_tokens) == num_patches # make sure the number of graph patch tokens is the same as the number of patches
-                    # insert the graph features after the graph start token
-                    cur_new_input_embeds = torch.cat(
-                        (cur_input_embeds[:graph_patch_tokens[0]], 
-                            cur_graph_features, 
-                            cur_input_embeds[graph_patch_tokens[-1] + 1:]), dim=0)
+
+                    if hasattr(self, 'graph_token_cross_attn'):
+                        # attend graph features with token embeddings
+                        cur_text_embeddings = torch.cat(
+                                (cur_input_embeds[:graph_patch_tokens[0]], 
+                                cur_input_embeds[graph_patch_tokens[-1] + 1:]), dim=0)
+                        cur_graph_features = torch.cat(
+                                (cur_input_embeds[:graph_patch_tokens[0]], 
+                                cur_graph_features,
+                                cur_input_embeds[graph_patch_tokens[-1] + 1:]), dim=0)
+                        cur_new_input_embeds = self.graph_token_cross_attn(cur_text_embeddings.unsqueeze(0).expand(1, -1, -1),
+                                                                            cur_graph_features.unsqueeze(0).expand(1, -1, -1),
+                                                                            cur_graph_features.unsqueeze(0).expand(1, -1, -1))
+                        cur_new_input_embeds = cur_new_input_embeds.view(-1, self.config.hidden_size)
+                        # fill in padding tokens
+                        cur_new_input_embeds = torch.cat(
+                                (self.embed_tokens(torch.tensor([PADDING_TOKEN]*num_patches, device=inputs_embeds.device)),
+                                cur_new_input_embeds), dim=0)
+                    else:
+                        # insert the graph features after the graph start token
+                        cur_new_input_embeds = torch.cat(
+                            (cur_input_embeds[:graph_patch_tokens[0]], 
+                                cur_graph_features, 
+                                cur_input_embeds[graph_patch_tokens[-1] + 1:]), dim=0)
                     # if cur_graph_idx == 0:
                     #     print(cur_new_input_embeds[:32].abs().sum(dim=1))
                     cur_graph_idx += 1

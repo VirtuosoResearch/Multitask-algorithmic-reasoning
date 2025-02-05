@@ -86,7 +86,7 @@ def initialize_model(args):
         model.get_model().initialize_graph_modules(
             graph_tower="SAGE",
             specs=specs, cfg=cfg, use_cross_attn=args.use_cross_attn, 
-            num_soft_prompts=args.num_soft_prompts, add_output_projection=args.add_output_projection,
+            add_output_projection=args.add_output_projection,
             test_classifier_before_cross_attn=args.test_classifier_before_cross_attn
         )
         model.requires_grad_(False)
@@ -97,9 +97,6 @@ def initialize_model(args):
         for p in model.get_model().graph_projector.parameters():
             p.requires_grad = True
         if args.use_cross_attn:
-            if not args.freeze_embeddings:
-                for p in model.get_model().graph_token_embeddings.parameters():
-                    p.requires_grad = True
             for p in model.get_model().graph_token_cross_attn.parameters():
                 p.requires_grad = True
 
@@ -207,9 +204,6 @@ def initialize_model(args):
             for p in model.model.get_model().graph_projector.parameters():
                 p.requires_grad = True
             if args.use_cross_attn:
-                if not args.freeze_embeddings:
-                    for p in model.model.get_model().graph_token_embeddings.parameters():
-                        p.requires_grad = True
                 for p in model.model.get_model().graph_token_cross_attn.parameters():
                     p.requires_grad = True
 
@@ -256,10 +250,8 @@ if __name__ == "__main__":
     parser.add_argument("--only_train_graph", action="store_true") # pretraining gnn 
     parser.add_argument("--test_classifier_before_cross_attn", action="store_true") # pretraining gnn
     parser.add_argument("--freeze_graph_tower", action="store_true")
-    parser.add_argument("--freeze_embeddings", action="store_true")
     parser.add_argument("--use_cross_attn", action="store_true")
     parser.add_argument("--add_output_projection", action="store_true")
-    parser.add_argument('--num_soft_prompts', type=int, default=15)
 
     parser.add_argument("--train_lora", action="store_true")
     parser.add_argument("--lora_rank", type=int, default=4)
@@ -359,7 +351,10 @@ if __name__ == "__main__":
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 print(f"Loaded model from {load_model_dir}")
             elif ("pt" in load_model_dir) and os.path.exists(load_model_dir):
-                print(model.load_state_dict(torch.load(load_model_dir), strict=False))
+                if args.use_graph_llama:
+                    print(model.model.load_state_dict(torch.load(load_model_dir), strict=False))
+                else:
+                    print(model.load_state_dict(torch.load(load_model_dir), strict=False))
                 print(f"Loaded model from {load_model_dir}")
 
         if not os.path.exists("external_lightning_logs"):
