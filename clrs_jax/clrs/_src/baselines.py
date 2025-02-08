@@ -37,6 +37,8 @@ import jax.numpy as jnp
 import numpy as np
 import optax
 
+from absl import logging
+
 
 _Array = chex.Array
 _DataPoint = probing.DataPoint
@@ -281,6 +283,9 @@ class BaselineModel(model.Model):
     extra_args[static_arg] = [4, 5]
     self.jitted_feedback = func(self._feedback, donate_argnums=[0, 3],
                                 **extra_args)
+    extra_args[static_arg] = [4, 5] # TODO: check what this is
+    self.jitted_compute_output_function_gradients = func(self._compute_output_function_gradients, donate_argnums=[0, 3],
+                                **extra_args)
     extra_args[static_arg] = [3, 4, 5, 6]
     self.jitted_predict = func(self._predict, **extra_args)
     extra_args[static_arg] = [3, 4]
@@ -336,15 +341,6 @@ class BaselineModel(model.Model):
         params, rng_key, feedback, algorithm_index)
     return self._maybe_pmean(lss), self._maybe_pmean(grads)
 
-  def _feedback(self, params, rng_key, feedback, opt_state, algorithm_index, is_graph_fts_avail):
-    lss, grads = jax.value_and_grad(self._loss)(
-        params, rng_key, feedback, algorithm_index, is_graph_fts_avail)
-    grads = self._maybe_pmean(grads)
-    params, opt_state = self._update_params(params, grads, opt_state,
-                                            algorithm_index)
-    lss = self._maybe_pmean(lss)
-    return lss, params, opt_state
-
   def _predict(self, params, rng_key: hk.PRNGSequence, features: _Features,
                algorithm_index: int, return_hints: bool,
                return_all_outputs: bool, is_graph_fts_avail: bool):
@@ -384,41 +380,7 @@ class BaselineModel(model.Model):
     grads = _maybe_pick_first_pmapped(grads)
 
     return  loss, grads
-
-  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback, is_graph_fts_avail: bool,
-               algorithm_index=None) -> float:
-    if algorithm_index is None:
-      assert len(self._spec) == 1
-      algorithm_index = 0
-    # Calculate and apply gradients.
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
-    feedback = _maybe_pmap_data(feedback)
-    loss, self._device_params, self._device_opt_state = self.jitted_feedback(
-        self._device_params, rng_keys, feedback,
-        self._device_opt_state, algorithm_index, is_graph_fts_avail)
-    loss = _maybe_pick_first_pmapped(loss)
-    return loss
-
-  def predict(self, rng_key: hk.PRNGSequence, features: _Features,
-              algorithm_index: Optional[int] = None,
-              return_hints: bool = False,
-              return_all_outputs: bool = False,
-              is_graph_fts_avail: bool = False):
-    """Model inference step."""
-    if algorithm_index is None:
-      assert len(self._spec) == 1
-      algorithm_index = 0
-
-    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
-    features = _maybe_pmap_data(features)
-    return _maybe_restack_from_pmap(
-        self.jitted_predict(
-            self._device_params, rng_keys, features,
-            algorithm_index,
-            return_hints,
-            return_all_outputs,
-            is_graph_fts_avail))
-
+  
   def _loss(self, params, rng_key, feedback, algorithm_index, is_graph_fts_avail):
     """Calculates model loss f(feedback; params)."""
     # Note: This is the main function for computing the loss.
@@ -453,6 +415,129 @@ class BaselineModel(model.Model):
         )
 
     return total_loss
+  
+  def _feedback(self, params, rng_key, feedback, opt_state, algorithm_index, is_graph_fts_avail):
+    lss, grads = jax.value_and_grad(self._loss)(
+        params, rng_key, feedback, algorithm_index, is_graph_fts_avail)
+    grads = self._maybe_pmean(grads)
+    params, opt_state = self._update_params(params, grads, opt_state,
+                                            algorithm_index)
+    lss = self._maybe_pmean(lss)
+    return lss, params, opt_state
+
+  def feedback(self, rng_key: hk.PRNGSequence, feedback: _Feedback, is_graph_fts_avail: bool,
+               algorithm_index=None) -> float:
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+    # Calculate and apply gradients.
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    feedback = _maybe_pmap_data(feedback)
+    loss, self._device_params, self._device_opt_state = self.jitted_feedback(
+        self._device_params, rng_keys, feedback,
+        self._device_opt_state, algorithm_index, is_graph_fts_avail)
+    loss = _maybe_pick_first_pmapped(loss)
+    return loss
+
+  def predict(self, rng_key: hk.PRNGSequence, features: _Features,
+              algorithm_index: Optional[int] = None,
+              return_hints: bool = False,
+              return_all_outputs: bool = False,
+              is_graph_fts_avail: bool = False):
+    """Model inference step."""
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    features = _maybe_pmap_data(features)
+    return _maybe_restack_from_pmap(
+        self.jitted_predict(
+            self._device_params, rng_keys, features,
+            algorithm_index,
+            return_hints,
+            return_all_outputs,
+            is_graph_fts_avail))
+  
+  def compute_output_function_gradients(self, rng_key: hk.PRNGSequence, feedback: _Feedback, is_graph_fts_avail: bool,
+               algorithm_index=None):
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+    # Calculate and apply gradients.
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    feedback = _maybe_pmap_data(feedback)
+    gradients_list, labels_list, masks_list = self.jitted_compute_output_function_gradients(
+        self._device_params, rng_keys, feedback,
+        self._device_opt_state, algorithm_index, is_graph_fts_avail)
+    return gradients_list, labels_list, masks_list
+  
+  def _compute_output_function_gradients(self, params, rng_key, feedback, opt_state, algorithm_index, is_graph_fts_avail):
+    labels_list, masks_list = self._get_output_function_labels(feedback)
+    gradients_list = jax.jacobian(self._get_output_function_grads)( 
+        params, rng_key, feedback, algorithm_index, is_graph_fts_avail)
+    return gradients_list, labels_list, masks_list
+  
+  def _get_output_function_grads(self, params, rng_key, feedback, algorithm_index, is_graph_fts_avail):
+    # Note: This is the main function for computing the loss.
+    output_preds, hint_preds = self.net_fn.apply(
+        params, rng_key, [feedback.features],
+        repred=False,
+        algorithm_index=algorithm_index,
+        return_hints=True,
+        return_all_outputs=False,
+        is_graph_fts_avail=is_graph_fts_avail)
+
+    nb_nodes = _nb_nodes(feedback, is_chunked=False)
+    lengths = feedback.features.lengths
+    output_list = []
+
+    # Calculate output loss.
+    for truth in feedback.outputs:
+      outputs = losses.compute_output_function_values(
+          truth=truth,
+          pred=output_preds[truth.name],
+          nb_nodes=nb_nodes,
+      )
+      if outputs is None: continue
+      output_list.append(outputs)
+
+    for truth in feedback.features.hints:
+      outputs = losses.compute_hints_function_values(
+            truth=truth,
+            preds=[x[truth.name] for x in hint_preds],
+            nb_nodes=nb_nodes,
+        )
+      if outputs is None: continue
+      output_list.append(outputs)
+
+    return output_list
+  
+  def _get_output_function_labels(self, feedback):
+    labels_list = []
+    mask_list = []
+
+    for truth in feedback.outputs:
+      labels = losses.compute_output_function_labels(truth=truth)
+      if labels is None: continue
+      if truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL, _Type.POINTER]:
+        mask = (labels == 0)
+      else:
+        mask = jnp.ones_like(labels)
+      labels_list.append(labels)
+      mask_list.append(mask)
+
+    for truth in feedback.features.hints:
+      labels = losses.compute_output_function_labels(truth=truth)
+      if labels is None: continue
+      labels = labels[1:]
+      if truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL, _Type.POINTER]:
+        mask = (labels == 0)
+      else:
+        mask = jnp.ones_like(labels)
+      labels_list.append(labels)
+      mask_list.append(mask)
+    return labels_list, mask_list
 
   def _update_params(self, params, grads, opt_state, algorithm_index):
     updates, opt_state = filter_null_grads(
@@ -508,6 +593,7 @@ class BaselineModel(model.Model):
         restored_params = restored_state['params']
       self.params = hk.data_structures.merge(self.params, restored_params)
       self.opt_state = restored_state['opt_state']
+    logging.info('Model restored from %s', path)
 
   def save_model(self, file_name: str):
     """Save model (processor weights only) to `file_name`."""

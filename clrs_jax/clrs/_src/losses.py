@@ -114,7 +114,6 @@ def output_loss(truth: _DataPoint, pred: _Array, nb_nodes: int) -> float:
 
   return total_loss  # pytype: disable=bad-return-type  # jnp-type
 
-
 def hint_loss_chunked(
     truth: _DataPoint,
     pred: _Array,
@@ -201,6 +200,76 @@ def _hint_loss(
     mask = jnp.ones_like(loss)
   return loss, mask
 
+def compute_output_function_values(truth: _DataPoint, pred: _Array, nb_nodes: int, is_hint = False) -> float:
+  """Output function value for full-sample training."""
+  EPS = 1e-4
+
+  if truth.type_ == _Type.SCALAR:
+    outputs = None # We don't consider regression loss in approximation
+
+  elif truth.type_ == _Type.MASK:
+    outputs = pred
+
+  elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
+    probs = jax.nn.softmax(pred, axis=-1)
+    if is_hint:
+      probs = jnp.sum(probs * truth.data[1:], axis=-1)
+    else:
+      probs = jnp.sum(probs * truth.data, axis=-1)
+    probs = jnp.clip(probs, EPS, 1 - EPS)
+    outputs = jnp.log(probs/(1-probs))
+
+  elif truth.type_ == _Type.POINTER:
+    probs = jax.nn.softmax(pred, axis=-1)
+    if is_hint:
+      probs = jnp.sum(hk.one_hot(truth.data[1:], nb_nodes) * probs, axis=-1)
+    else:
+      probs = jnp.sum(hk.one_hot(truth.data, nb_nodes) * probs, axis=-1)
+    probs = jnp.clip(probs, EPS, 1 - EPS)
+    outputs = jnp.log(probs/(1-probs))
+
+  elif truth.type_ == _Type.PERMUTATION_POINTER:
+    outputs = None # skip for PERMUTATION_POINTER
+
+  return outputs # pytype: disable=bad-return-type  # jnp-type
+
+def compute_hints_function_values(
+    truth: _DataPoint,
+    preds: List[_Array],
+    nb_nodes: int,
+):
+  """Hint outputs for full-sample training."""
+  outputs = compute_output_function_values(
+      truth=truth,
+      pred=jnp.stack(preds),
+      nb_nodes=nb_nodes,
+      is_hint = True,
+  )
+  return outputs
+
+
+def compute_output_function_labels(truth: _DataPoint) -> float:
+  """Output function value for full-sample training."""
+  key = jax.random.key(42)
+
+  if truth.type_ == _Type.SCALAR:
+    labels = None
+
+  elif truth.type_ == _Type.MASK:
+    labels = truth.data
+
+  elif truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL]:
+    # randomly sample [0, 1] as labels
+    labels = jax.random.bernoulli(key, 0.5, shape=truth.data.shape[:-1]) # remove the last dimension as it is one-hot
+
+  elif truth.type_ == _Type.POINTER:
+    labels = jax.random.bernoulli(key, 0.5, shape=truth.data.shape)
+
+  elif truth.type_ == _Type.PERMUTATION_POINTER:
+    # skip for PERMUTATION_POINTER
+    labels = None
+
+  return labels # pytype: disable=bad-return-type  # jnp-type
 
 def _is_not_done_broadcast(lengths, i, tensor):
   is_not_done = (lengths > i + 1) * 1.0
