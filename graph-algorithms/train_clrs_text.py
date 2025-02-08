@@ -87,6 +87,7 @@ def initialize_model(args):
             graph_tower="SAGE",
             specs=specs, cfg=cfg, use_cross_attn=args.use_cross_attn, 
             add_output_projection=args.add_output_projection,
+            alignment_loss_weight=args.alignment_loss_weight,
             test_classifier_before_cross_attn=args.test_classifier_before_cross_attn
         )
         model.requires_grad_(False)
@@ -252,6 +253,7 @@ if __name__ == "__main__":
     parser.add_argument("--freeze_graph_tower", action="store_true")
     parser.add_argument("--use_cross_attn", action="store_true")
     parser.add_argument("--add_output_projection", action="store_true")
+    parser.add_argument("--alignment_loss_weight", type=float, default=0.0)
 
     parser.add_argument("--train_lora", action="store_true")
     parser.add_argument("--lora_rank", type=int, default=4)

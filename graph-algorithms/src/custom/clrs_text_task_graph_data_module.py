@@ -98,6 +98,17 @@ class CasualLMInstructionCollator:
             graph_sizes.append(len(batch_graphs[-1].pos))
 
         # prepare input sources
+        original_sources = []
+        for idx, instance in enumerate(converted_batch):
+            # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text instruction
+            source = instance["input"]
+            tokenized_source = self.tokenizer(source)["input_ids"]
+            if len(tokenized_source) <= self.max_source_length:
+                original_sources.append(source)
+            else:
+                original_sources.append(self.tokenizer.decode(tokenized_source[:self.max_source_length], skip_special_tokens=True))
+
+        # prepare input sources
         sources = []; source_lengths = []
         for idx, instance in enumerate(converted_batch):
             # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text instruction
@@ -131,6 +142,13 @@ class CasualLMInstructionCollator:
                 padding=self.padding,
                 return_tensors=self.return_tensors, 
                 truncation=True)
+        
+        original_input_ids = self.tokenizer(
+                text = inputs, 
+                padding="longest",
+                return_tensors=self.return_tensors, 
+                truncation=True)["input_ids"]
+        model_inputs["original_input_ids"] = original_input_ids
         
         # prepare labels
         model_inputs["labels"] = model_inputs["input_ids"].clone()
