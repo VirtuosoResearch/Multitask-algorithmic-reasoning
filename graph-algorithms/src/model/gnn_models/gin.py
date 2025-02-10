@@ -9,6 +9,29 @@ import networkx as nx
 import numpy as np
 import scipy.sparse as sp
 
+TASK_LIST = [
+    "node_count", "edge_count", "edge_existence", "node_degree",
+    "connectivity", "cycle_check", "shortest_path", "triangle_count"
+]
+
+TASK_MAP = {
+    'edge_existence': 'edge_existence',
+    'node_degree': 'node_degree',
+    'node_count': 'node_count',
+    'edge_count': 'edge_count',
+    'connected_nodes': 'connectivity',
+    'cycle_check': 'cycle_check',
+    'disconnected_nodes': 'connectivity',
+    'reachability': 'connectivity',
+    'shortest_path': 'shortest_path',
+    'maximum_flow': 'connectivity',
+    'triangle_counting': 'triangle_count',
+    'node_classification': 'node_degree'
+}
+
+    
+
+
 class GINEncoder(nn.Module):
     def __init__(self, num_features, hidden_dim, num_layers, task_names):
         super(GINEncoder, self).__init__()
@@ -120,14 +143,19 @@ class MultiTaskGIN(nn.Module):
         self.encoder = GINEncoder(num_features, hidden_dim, num_layers, task_names)
         self.heads = MultiTaskHeads(hidden_dim)
 
-    def forward(self, data, task_index=0):
+    def forward(self, data, task_name, is_pretrain=False):
+        if not is_pretrain:
+            task_name = TASK_MAP[task_name]
         # task_branch is a string that indicates which encoder branch to use.
         x, edge_index = data.x, data.edge_index
-        task_branch = self.task_names[task_index]
         # If using batching, data.batch indicates the graph id for each node.
         batch_index = data.batch if hasattr(data, 'batch') else torch.zeros(x.size(0), dtype=torch.long)
         # Use the specified branch for encoding.
-        node_emb = self.encoder(x, edge_index, task_branch)
+        node_emb = self.encoder(x, edge_index, task_name)
         outputs = self.heads(node_emb, batch_index, 
                              edge_pair_tasks=data.edge_pair_tasks if hasattr(data, 'edge_pair_tasks') else None)
         return outputs
+
+    def encode(self, data, task_name):
+        task_name = TASK_MAP[task_name]
+        return self.encoder(data.x, data.edge_index, task_name)

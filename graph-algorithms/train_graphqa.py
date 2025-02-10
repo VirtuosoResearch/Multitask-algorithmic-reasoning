@@ -6,7 +6,7 @@ import wandb
 from src.custom.algorithm_task_data_module import AlgorithmDataModule
 from src.custom.algorithm_task_graph_data_module import AlgorithmGraphDataModule
 from src.model.GraphLlama_Graphqa import GraphLlamaForCausalLM_GraphQA
-from src.custom.multitask_model import MultitaskModel
+from src.custom.multitask_model_graphqa import MultitaskModel_GraphQA
 
 from functools import partial
 from pytorch_lightning.trainer.states import RunningStage, TrainerFn
@@ -31,7 +31,7 @@ from adapters import SeqBnInvConfig, PrefixTuningConfig, BnConfig, DoubleSeqBnCo
 from adapters import AutoAdapterModel,list_adapters, BnConfig
 from torch._inductor.async_compile import AsyncCompile
 
-logging.basicConfig(level=logging.INFO, force=True)
+logging.basicConfig(filename='log.log', level=logging.INFO, force=True, filemode='a')
 torch.set_float32_matmul_precision("high")
 
 # peft.__version__ '0.12.0'    
@@ -231,7 +231,7 @@ if __name__ == "__main__":
     parser.add_argument("--weight_decay", type=float, default=1e-3)
     parser.add_argument("--disable_checkpointing", action="store_true")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--max_length", type=int, default=256)
+    parser.add_argument("--max_length", type=int, default=2048)
     parser.add_argument("--max_output_length", type=int, default=64)
     parser.add_argument("--task_idxes", type=int, nargs="+", default=None)
     parser.add_argument("--save_every_epoch", action="store_true")
@@ -329,7 +329,7 @@ if __name__ == "__main__":
         data_module.setup(stage="fit")
 
         extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
-        lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
+        lm = MultitaskModel_GraphQA(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
         
@@ -337,7 +337,7 @@ if __name__ == "__main__":
         load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
         if load_model_dir is not None:
             if ("ckpt" in load_model_dir) and os.path.exists(load_model_dir):
-                lm = MultitaskModel.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
+                lm = MultitaskModel_GraphQA.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 print(f"Loaded model from {load_model_dir}")
@@ -415,7 +415,7 @@ if __name__ == "__main__":
             if args.use_qadapter or args.use_qlora or args.use_3bit or args.use_2bit:                         
                 model, tokenizer, hf_key, model_type, append_eos = initialize_model(args)
                 model.load_state_dict(state_dict, strict=False)
-                lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
+                lm = MultitaskModel_GraphQA(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 if args.use_3bit or args.use_2bit:
