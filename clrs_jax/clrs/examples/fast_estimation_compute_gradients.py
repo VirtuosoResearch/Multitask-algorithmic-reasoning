@@ -1,18 +1,3 @@
-# Copyright 2022 DeepMind Technologies Limited. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
 """Run training of one or more algorithmic tasks from CLRS."""
 import os
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
@@ -29,6 +14,8 @@ import numpy as np
 import requests
 import tensorflow as tf
 import wandb
+import pickle
+import haiku as hk
 
 from pynvml import *
 import time
@@ -144,6 +131,11 @@ flags.DEFINE_string('wandb_name', None,
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
 
+flags.DEFINE_string('load_checkpoint_path', 'test',
+                    'Path from which to load the checkpoint.')
+flags.DEFINE_integer('gradient_projection_seed', 0, 'Seed')
+flags.DEFINE_integer('gradient_projection_dim', 400, 'Dimension of the gradient projection')
+flags.DEFINE_integer('change_algo_index', 0, 'Index of the algorithm to change the checkpoint')
 
 flags.DEFINE_boolean('use_branching_structure', False,
                      'Whether to define the branching structure of the model.')
@@ -502,10 +494,7 @@ def main(unused_argv):
       nb_heads=FLAGS.nb_heads,
       branching_structure=branching_structure
   )
-  checkpoint_path = os.path.join(FLAGS.checkpoint_path, 
-                    f"processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
-                    + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
-                    )
+  checkpoint_path = os.path.join(FLAGS.checkpoint_path, FLAGS.load_checkpoint_path)
   if not os.path.exists(checkpoint_path):
     os.makedirs(checkpoint_path)
   model_params = dict(
@@ -563,6 +552,23 @@ def main(unused_argv):
     logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
   # Note: start training loop
   start_time = time.time()
+
+  def restore_model(model, file_name: str, change_algo_index=0):
+    """Restore model from `file_name`."""
+    path = os.path.join(model.checkpoint_path, file_name)
+    new_params = {}
+    with open(path, 'rb') as f:
+      restored_state = pickle.load(f)
+      restored_params = restored_state['params']
+      for key in restored_params:
+        if "processor" in key:
+          new_params[key] = restored_params[key]
+        if "encoders_decoders" in key and "algo_{}".format(int(change_algo_index)) in key:
+          new_params[key.replace("algo_{}".format(int(change_algo_index)), "algo_{}".format(0))] = restored_params[key]
+
+      model.params = hk.data_structures.merge(model.params, new_params)
+    logging.info('Model restored from %s', path)
+
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
 
@@ -580,6 +586,27 @@ def main(unused_argv):
       else:
         train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
 
+      # Initialize projection matrix
+      gradient_dim = 0
+      for key in train_model.params:
+          for param in train_model.params[key]:
+            if 'processor' in key and "layer_norm" not in key:
+              gradient_dim += np.prod(train_model.params[key][param].shape)
+
+      # collect gradients
+      gradients_dir = f"./gradients/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
+                    + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
+                    + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
+      if not os.path.exists(gradients_dir):
+        os.makedirs(gradients_dir)
+          
+      np.random.seed(FLAGS.gradient_projection_seed); project_dim = FLAGS.gradient_projection_dim
+      matrix_P = (2 * np.random.randint(2, size=(gradient_dim, project_dim)) - 1).astype(np.float32)
+      matrix_P *= 1 / np.sqrt(project_dim)
+
+      # load checkpoint 
+      restore_model(train_model, 'best.pkl', change_algo_index=FLAGS.change_algo_index)
+
     # Training step. Note: if there are multiple samplers, it will apply one step per sampler
     for algo_idx in range(len(train_samplers)):
       feedback = feedback_list[algo_idx]
@@ -593,113 +620,57 @@ def main(unused_argv):
         # since there is no state to maintain between batches.
         length_and_algo_idx = algo_idx
       # Note: computing the loss follows: 
-      #     feedback --> _feedback --> _loss + _update_params
-      cur_loss = train_model.feedback(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
-      accum_loss += cur_loss
-      rng_key = new_rng_key
-
-      if FLAGS.chunked_training:
-        examples_in_chunk = np.sum(feedback.features.is_last).item()
-      else:
-        examples_in_chunk = len(feedback.features.lengths)
-      current_train_items[algo_idx] += examples_in_chunk
-      logging.info('Algo %s step %i current loss %f, current_train_items %i.',
-                   FLAGS.algorithms[algo_idx], step,
-                   cur_loss, current_train_items[algo_idx])
+      #     feedback --> jitted_feedback --> _feedback --> _loss + _update_params
+      # compute gradients
+      #     compute_output_function_gradients --> jitted_compute_output_function_value_grads --> _compute_output_function_gradients
+      gradients_list, labels_list, masks_list = train_model.compute_output_function_gradients(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
       
-      if step == 1:
-        print_gpu_utilization()
-
-    # Periodically evaluate model
-    if step >= next_eval:
-      eval_model.params = train_model.params
-      for algo_idx in range(len(train_samplers)):
-        common_extras = {'examples_seen': current_train_items[algo_idx],
-                         'step': step,
-                         'algorithm': FLAGS.algorithms[algo_idx]}
-
-        # Validation info.
-        new_rng_key, rng_key = jax.random.split(rng_key)
-        val_stats = collect_and_eval(
-            val_samplers[algo_idx],
-            functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-            val_sample_counts[algo_idx],
-            new_rng_key,
-            extras=common_extras)
-        logging.info('(val) algo %s step %d: %s',
-                     FLAGS.algorithms[algo_idx], step, val_stats)
-        val_scores[algo_idx] = val_stats['score']
-        if FLAGS.wandb_project:
-          if step > 0:
-            avg_loss = accum_loss / FLAGS.eval_every
-            wandb.log(
-                {
-                    "loss": avg_loss,
-                    "val_score": val_stats['score'],
-                }
-            )
-
-      next_eval += FLAGS.eval_every
-
-      # If best total score, update best checkpoint.
-      # Also save a best checkpoint on the first step.
-      msg = (f'best avg val score was '
-             f'{best_score/len(FLAGS.algorithms):.3f}, '
-             f'current avg val score is {np.mean(val_scores):.3f}, '
-             f'val scores are: ')
-      msg += ', '.join(
-          ['%s: %.3f' % (x, y) for (x, y) in zip(FLAGS.algorithms, val_scores)])
-      if (sum(val_scores) > best_score) or step == 0:
-        best_score = sum(val_scores)
-        logging.info('Checkpointing best model, %s', msg)
-        train_model.save_model('best.pkl')
-      else:
-        logging.info('Not saving new best model, %s', msg)
-
-      accum_loss = 0
-      avg_loss = 0
-
+      def flatten_gradients(gradients, is_hints = False):
+        # length of gradients is 1
+        return_params = []
+        for name, params in gradients.items():
+          if "processor" in name and ("layer_norm" not in name):
+            params = jax.tree.flatten(params)[0]
+            if len(params[0].shape) == 4:
+              length, batch_size, num_nodes = params[0].shape[0], params[0].shape[1], params[0].shape[2]
+              params = [param.reshape(length, batch_size, num_nodes, -1) for param in params]
+              params = np.concatenate(params, axis=3)
+            elif len(params[0].shape) == 3:
+              batch_size, num_nodes = params[0].shape[0], params[0].shape[1]
+              params = [param.reshape(batch_size, num_nodes, -1) for param in params]
+              params = np.concatenate(params, axis=2)
+            else:
+              return []
+            return_params.append(params)
+        if len(return_params[0].shape) == 4:
+          return_params = np.concatenate(return_params, axis=3)
+        else:
+          return_params = np.concatenate(return_params, axis=2)
+        return return_params
+      
+      final_gradients = []; final_labels = []
+      for i, (gradients, labels, masks) in enumerate(zip(gradients_list, labels_list, masks_list)):
+        gradients = flatten_gradients(gradients, is_hints = (i>0))
+        if len(gradients) == 0:
+          continue
+        labels = np.array(labels, dtype=np.int32)
+        masks = np.array(masks, dtype=np.float32)
+        masks[masks == 0] = -1
+        gradients = gradients * masks.reshape(*masks.shape, 1)
+        gradients = gradients.reshape(-1, gradients.shape[-1])
+        labels = labels.reshape(-1)
+        final_gradients.append(gradients)
+        final_labels.append(labels)
+      final_gradients = np.concatenate(final_gradients, axis=0)
+      final_labels = np.concatenate(final_labels, axis=0)
+      final_gradients = final_gradients @ matrix_P
+      np.save(f"{gradients_dir}/gradients_{step}_algorithm_{algo_idx}.npy", final_gradients)
+      np.save(f"{gradients_dir}/labels_{step}_algorithm_{algo_idx}.npy", labels)
     step += 1
-    length_idx = (length_idx + 1) % len(train_lengths)
-  emd_time = time.time()
-  logging.info(f"Training time: {emd_time - start_time} seconds.")
-
-  logging.info(f'Restoring best model from checkpoint {checkpoint_path}...')
-  eval_model.restore_model('best.pkl', only_load_processor=False)
-
-  for algo_idx in range(len(train_samplers)):
-    common_extras = {'examples_seen': current_train_items[algo_idx],
-                      'step': step,
-                      'algorithm': FLAGS.algorithms[algo_idx]}
-
-    # Validation info.
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    val_stats = collect_and_eval(
-        val_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-        val_sample_counts[algo_idx],
-        new_rng_key,
-        extras=common_extras)
-    logging.info('(val) algo %s step %d: %s',
-                  FLAGS.algorithms[algo_idx], step, val_stats)
-
-    common_extras = {'examples_seen': current_train_items[algo_idx],
-                     'step': step,
-                     'algorithm': FLAGS.algorithms[algo_idx]}
-
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    test_stats = collect_and_eval(
-        test_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-        test_sample_counts[algo_idx],
-        new_rng_key,
-        extras=common_extras)
-    logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
-    if FLAGS.wandb_project:
-        wandb.log({"test_score": test_stats['score']})
 
   logging.info('Done!')
 
 
 if __name__ == '__main__':
   app.run(main)
+

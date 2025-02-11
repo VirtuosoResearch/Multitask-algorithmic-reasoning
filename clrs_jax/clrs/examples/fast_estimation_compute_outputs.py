@@ -1,18 +1,3 @@
-# Copyright 2022 DeepMind Technologies Limited. All Rights Reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-# ==============================================================================
-
 """Run training of one or more algorithmic tasks from CLRS."""
 import os
 os.environ["XLA_PYTHON_CLIENT_PREALLOCATE"]="false"
@@ -29,6 +14,8 @@ import numpy as np
 import requests
 import tensorflow as tf
 import wandb
+import pickle
+import haiku as hk
 
 from pynvml import *
 import time
@@ -143,6 +130,15 @@ flags.DEFINE_string('wandb_name', None,
                     'Name of `wandb` run.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
+
+flags.DEFINE_string('load_checkpoint_path', 'test',
+                    'Path from which to load the checkpoint.')
+flags.DEFINE_integer('gradient_projection_seed', 0, 'Seed')
+flags.DEFINE_integer('gradient_projection_dim', 400, 'Dimension of the gradient projection')
+
+flags.DEFINE_integer('runs', 10, "Runs")
+flags.DEFINE_integer('layer', 0, "Runs")
+flags.DEFINE_float('perturb_ratio', 0.01, 'Learning rate for the gradient projection')
 
 
 flags.DEFINE_boolean('use_branching_structure', False,
@@ -502,10 +498,7 @@ def main(unused_argv):
       nb_heads=FLAGS.nb_heads,
       branching_structure=branching_structure
   )
-  checkpoint_path = os.path.join(FLAGS.checkpoint_path, 
-                    f"processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
-                    + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
-                    )
+  checkpoint_path = os.path.join(FLAGS.checkpoint_path, FLAGS.load_checkpoint_path)
   if not os.path.exists(checkpoint_path):
     os.makedirs(checkpoint_path)
   model_params = dict(
@@ -547,159 +540,159 @@ def main(unused_argv):
         )
   else:
     train_model = eval_model
-
-  # Training loop.
-  best_score = -1.0
-  current_train_items = [0] * len(FLAGS.algorithms)
-  step = 0
-  next_eval = 0
-  # Make sure scores improve on first step, but not overcome best score
-  # until all algos have had at least one evaluation.
-  val_scores = [-99999.9] * len(FLAGS.algorithms)
   length_idx = 0
-  accum_loss = 0
 
   for algo_idx in range(len(train_samplers)):
     logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
   # Note: start training loop
   start_time = time.time()
-  while step < FLAGS.train_steps:
-    feedback_list = [next(t) for t in train_samplers]
 
-    # Initialize model.
-    if step == 0:
-      all_features = [f.features for f in feedback_list]
-      if FLAGS.chunked_training:
-        # We need to initialize the model with samples of all lengths for
-        # all algorithms. Also, we need to make sure that the order of these
-        # sample sizes is the same as the order of the actual training sizes.
-        all_length_features = [all_features] + [
-            [next(t).features for t in train_samplers]
-            for _ in range(len(train_lengths))]
-        train_model.init(all_length_features[:-1], FLAGS.seed + 1)
-      else:
-        train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
-
-    # Training step. Note: if there are multiple samplers, it will apply one step per sampler
-    for algo_idx in range(len(train_samplers)):
-      feedback = feedback_list[algo_idx]
-      rng_key, new_rng_key = jax.random.split(rng_key)
-      if FLAGS.chunked_training:
-        # In chunked training, we must indicate which training length we are
-        # using, so the model uses the correct state.
-        length_and_algo_idx = (length_idx, algo_idx)
-      else:
-        # In non-chunked training, all training lengths can be treated equally,
-        # since there is no state to maintain between batches.
-        length_and_algo_idx = algo_idx
-      # Note: computing the loss follows: 
-      #     feedback --> _feedback --> _loss + _update_params
-      cur_loss = train_model.feedback(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
-      accum_loss += cur_loss
-      rng_key = new_rng_key
-
-      if FLAGS.chunked_training:
-        examples_in_chunk = np.sum(feedback.features.is_last).item()
-      else:
-        examples_in_chunk = len(feedback.features.lengths)
-      current_train_items[algo_idx] += examples_in_chunk
-      logging.info('Algo %s step %i current loss %f, current_train_items %i.',
-                   FLAGS.algorithms[algo_idx], step,
-                   cur_loss, current_train_items[algo_idx])
+  def assign_to_model_parameters(model, params=None, layer=0):
+    """Restore model from `file_name`."""
+    path = os.path.join(model.checkpoint_path, 'best.pkl')
+    with open(path, 'rb') as f:
+      restored_state = pickle.load(f)
+      restored_params = restored_state['params']
       
-      if step == 1:
-        print_gpu_utilization()
+      if params is not None:
+        cur_len = 0
+        for key in restored_params.keys():
+            for param in restored_params[key]:
+              if 'processor' in key and "layer_norm" not in key:
+                if key[-1] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] and int(key[-1]) >= layer:
+                  cur_dim = np.prod(restored_params[key][param].shape)
+                  cur_param = params[cur_len:cur_len+cur_dim]
+                  restored_params[key][param] += np.reshape(cur_param, restored_params[key][param].shape)
+                  cur_len += cur_dim
 
-    # Periodically evaluate model
-    if step >= next_eval:
-      eval_model.params = train_model.params
+      model.params = hk.data_structures.merge(model.params, restored_params)
+      model.opt_state = restored_state['opt_state']
+  
+  def get_pretrained_model_weights(model, layer=0):
+    path = os.path.join(model.checkpoint_path, 'best.pkl')
+    with open(path, 'rb') as f:
+      restored_state = pickle.load(f)
+      restored_params = restored_state['params']
+      
+      model_params = []
+      for key in restored_params.keys():
+          for param in restored_params[key]:
+            if 'processor' in key and "layer_norm" not in key:
+              if key[-1] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] and int(key[-1]) >= layer:
+                model_params.append(restored_params[key][param].flatten())
+      return np.concatenate(model_params)
+    
+  def solve_logistic_regression(gradients, labels):
+    from sklearn.linear_model import LogisticRegression
+    clf = LogisticRegression(random_state=0).fit(gradients, labels)
+    logging.info('Logistic regression score: %s', clf.score(gradients, labels))
+    return clf.coef_
+    
+  def l2_norm(params):
+    return np.linalg.norm(params)
+
+  relative_errors = []
+  for run in range(FLAGS.runs):
+    step = 0
+    while step < FLAGS.train_steps:
+      feedback_list = [next(t) for t in train_samplers]
+
+      # Initialize model.
+      if step == 0:
+        all_features = [f.features for f in feedback_list]
+        if FLAGS.chunked_training:
+          # We need to initialize the model with samples of all lengths for
+          # all algorithms. Also, we need to make sure that the order of these
+          # sample sizes is the same as the order of the actual training sizes.
+          all_length_features = [all_features] + [
+              [next(t).features for t in train_samplers]
+              for _ in range(len(train_lengths))]
+          train_model.init(all_length_features[:-1], FLAGS.seed + 1)
+        else:
+          train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
+
+        # Initialize projection matrix
+        gradient_dim = 0
+        for key in train_model.params:
+            for param in train_model.params[key]:
+              if 'processor' in key and "layer_norm" not in key:
+                if key[-1] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] and int(key[-1]) >= FLAGS.layer:
+                  gradient_dim += np.prod(train_model.params[key][param].shape)
+
+        # collect gradients
+        gradients_dir = f"./gradients/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
+                      + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
+                      + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
+        if not os.path.exists(gradients_dir):
+          os.makedirs(gradients_dir)
+                    
+        np.random.seed(FLAGS.gradient_projection_seed); project_dim = FLAGS.gradient_projection_dim
+        matrix_P = (2 * np.random.randint(2, size=(gradient_dim, project_dim)) - 1).astype(np.float32)
+        matrix_P *= 1 / np.sqrt(project_dim)
+
+        # load gradients
+        gradients, labels = [], []; count = 0
+        for file in os.listdir(gradients_dir):
+          if "gradients" in file:
+            gradients.append(np.load(os.path.join(gradients_dir, file)))
+            count += 1
+            if count >= 20:
+              break
+        count = 0
+        for file in os.listdir(gradients_dir):
+          if "labels" in file:
+            labels.append(np.load(os.path.join(gradients_dir, file)))
+            count += 1
+            if count >= 20:
+              break
+        gradients = np.concatenate(gradients, axis=0)
+        labels = np.concatenate(labels, axis=0)
+        logging.info('Gradients shape: %s', gradients.shape)
+
+        coef = solve_logistic_regression(gradients, labels)
+        logging.info('Logistic regression weights: %s', l2_norm(coef.flatten()))
+        update_weight = coef.T.flatten() # matrix_P @
+
+        # load checkpoint 
+        train_model.restore_model('best.pkl', only_load_processor=False)
+
+        logging.info('Pretrained model weights: %s', l2_norm(get_pretrained_model_weights(train_model, FLAGS.layer)))
+        # update_weight = np.random.randn(gradient_dim)
+        update_weight = (update_weight / l2_norm(update_weight)) * (FLAGS.perturb_ratio * l2_norm(get_pretrained_model_weights(train_model, FLAGS.layer)))
+        logging.info('Update weight: %s', l2_norm(update_weight))
+
+      # Training step. Note: if there are multiple samplers, it will apply one step per sampler
       for algo_idx in range(len(train_samplers)):
-        common_extras = {'examples_seen': current_train_items[algo_idx],
-                         'step': step,
-                         'algorithm': FLAGS.algorithms[algo_idx]}
+        feedback = feedback_list[algo_idx]
+        rng_key, new_rng_key = jax.random.split(rng_key)
+        if FLAGS.chunked_training:
+          # In chunked training, we must indicate which training length we are
+          # using, so the model uses the correct state.
+          length_and_algo_idx = (length_idx, algo_idx)
+        else:
+          # In non-chunked training, all training lengths can be treated equally,
+          # since there is no state to maintain between batches.
+          length_and_algo_idx = algo_idx
+        # Note: computing the loss follows: 
+        #     feedback --> jitted_feedback --> _feedback --> _loss + _update_params
+        # compute gradients
+        #     compute_output_function_gradients --> jitted_compute_output_function_value_grads --> _compute_output_function_gradients
+        assign_to_model_parameters(train_model)
+        outputs_list_1 = train_model.compute_output_function_values(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
 
-        # Validation info.
-        new_rng_key, rng_key = jax.random.split(rng_key)
-        val_stats = collect_and_eval(
-            val_samplers[algo_idx],
-            functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-            val_sample_counts[algo_idx],
-            new_rng_key,
-            extras=common_extras)
-        logging.info('(val) algo %s step %d: %s',
-                     FLAGS.algorithms[algo_idx], step, val_stats)
-        val_scores[algo_idx] = val_stats['score']
-        if FLAGS.wandb_project:
-          if step > 0:
-            avg_loss = accum_loss / FLAGS.eval_every
-            wandb.log(
-                {
-                    "loss": avg_loss,
-                    "val_score": val_stats['score'],
-                }
-            )
+        assign_to_model_parameters(train_model, update_weight, FLAGS.layer)
+        outputs_list_2 = train_model.compute_output_function_values(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
+        
+        for idx, outputs in enumerate(outputs_list_1):
+          error = l2_norm(outputs_list_1[idx] - outputs_list_2[idx])
+          relative_errors.append(np.square(error / l2_norm(outputs_list_1[idx])))
+      step += 1
+    logging.info("Relative errors: {} Stds: {}".format(np.mean(relative_errors), np.std(relative_errors)))
 
-      next_eval += FLAGS.eval_every
-
-      # If best total score, update best checkpoint.
-      # Also save a best checkpoint on the first step.
-      msg = (f'best avg val score was '
-             f'{best_score/len(FLAGS.algorithms):.3f}, '
-             f'current avg val score is {np.mean(val_scores):.3f}, '
-             f'val scores are: ')
-      msg += ', '.join(
-          ['%s: %.3f' % (x, y) for (x, y) in zip(FLAGS.algorithms, val_scores)])
-      if (sum(val_scores) > best_score) or step == 0:
-        best_score = sum(val_scores)
-        logging.info('Checkpointing best model, %s', msg)
-        train_model.save_model('best.pkl')
-      else:
-        logging.info('Not saving new best model, %s', msg)
-
-      accum_loss = 0
-      avg_loss = 0
-
-    step += 1
-    length_idx = (length_idx + 1) % len(train_lengths)
-  emd_time = time.time()
-  logging.info(f"Training time: {emd_time - start_time} seconds.")
-
-  logging.info(f'Restoring best model from checkpoint {checkpoint_path}...')
-  eval_model.restore_model('best.pkl', only_load_processor=False)
-
-  for algo_idx in range(len(train_samplers)):
-    common_extras = {'examples_seen': current_train_items[algo_idx],
-                      'step': step,
-                      'algorithm': FLAGS.algorithms[algo_idx]}
-
-    # Validation info.
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    val_stats = collect_and_eval(
-        val_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-        val_sample_counts[algo_idx],
-        new_rng_key,
-        extras=common_extras)
-    logging.info('(val) algo %s step %d: %s',
-                  FLAGS.algorithms[algo_idx], step, val_stats)
-
-    common_extras = {'examples_seen': current_train_items[algo_idx],
-                     'step': step,
-                     'algorithm': FLAGS.algorithms[algo_idx]}
-
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    test_stats = collect_and_eval(
-        test_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-        test_sample_counts[algo_idx],
-        new_rng_key,
-        extras=common_extras)
-    logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
-    if FLAGS.wandb_project:
-        wandb.log({"test_score": test_stats['score']})
-
+  logging.info("Relative errors: {} Stds: {}".format(np.mean(relative_errors), np.std(relative_errors)))
   logging.info('Done!')
 
 
 if __name__ == '__main__':
   app.run(main)
+

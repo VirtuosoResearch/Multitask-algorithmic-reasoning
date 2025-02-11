@@ -206,6 +206,7 @@ def seq2graph(seq, feature_dim=32):
         num_nodes = max(nodes) + 1
     else:
         raise ValueError("Nodes information not found in the input string.")
+    
 
     # --- Extract the edges ---
     # Find all occurrences of edge tuples in the form (u, v)
@@ -304,6 +305,8 @@ def seq2graph(seq, feature_dim=32):
     data.connectivity = connectivity_tensor
     data.shortest_path = shortest_path_tensor
 
+    data.pos = torch.arange(0, 1, 1/num_nodes, dtype=torch.float)
+    #print(data)
     return data
 
 @dataclass
@@ -364,22 +367,27 @@ class CasualLMInstructionCollator:
     pad_to_multiple_of: Optional[int] = None 
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
+    special_token_for_graphs = "<|reserved_special_token_0|>" # id: 128002
 
     def __call__(self, batch, return_tensors=None):
         if return_tensors is None:
                 return_tensors = self.return_tensors
 
-        converted_batch = batch
+        converted_batch = []
         batch_graphs = []; graph_sizes = []
-        for instance in converted_batch:
+        for instance in batch:
             #print(instance['input'])
-            if 'The edges in G are' not in instance['input']:
-                continue
-            batch_graphs.append(seq2graph(instance["input"]))
+            if 'The edges in G are' in instance['input']:
+                converted_batch.append(instance)
+                batch_graphs.append(seq2graph(instance["input"]))
+                graph_sizes.append(len(batch_graphs[-1].pos))
             #graph_sizes.append(len(batch_graphs[-1].pos))
             #print(batch_graphs[-1])
             #break
-
+        #print(batch_graphs)
+        #print(converted_batch)
+        #print(batch_graphs)
+        """
         # prepare input sources
         sources = []; source_lengths = []
         for instance in converted_batch:
@@ -406,14 +414,19 @@ class CasualLMInstructionCollator:
             label_lengths.append(min(len(tokenized_label), self.max_target_length))
 
         inputs = [source + " " + label for source, label in zip(sources, labels)]
-
+        print(inputs)
         model_inputs = self.tokenizer(
                 text = inputs, 
                 max_length=self.max_source_length, 
                 padding=self.padding,
                 return_tensors=self.return_tensors, 
                 truncation=True)
-        
+        original_input_ids = self.tokenizer(
+                text = inputs, 
+                padding="longest",
+                return_tensors=self.return_tensors, 
+                truncation=True)["input_ids"]
+        model_inputs["original_input_ids"] = original_input_ids
         # prepare labels
         model_inputs["labels"] = model_inputs["input_ids"].clone()
         label_mask = model_inputs["attention_mask"].clone().bool()
@@ -434,7 +447,79 @@ class CasualLMInstructionCollator:
         #print("=======>", model_inputs)
 
         return model_inputs
+        """
+        # prepare input sources
+        original_sources = []
+        for idx, instance in enumerate(converted_batch):
+            # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text instruction
+            source = instance["input"]
+            tokenized_source = self.tokenizer(source)["input_ids"]
+            if len(tokenized_source) <= self.max_source_length:
+                original_sources.append(source)
+            else:
+                original_sources.append(self.tokenizer.decode(tokenized_source[:self.max_source_length], skip_special_tokens=True))
 
+        # prepare input sources
+        sources = []; source_lengths = []
+        for idx, instance in enumerate(converted_batch):
+            # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text instruction
+            source = instance["input"].split("\n")[0]
+            source += "".join([self.special_token_for_graphs]*graph_sizes[idx]) 
+            source += instance["input"].split("\n")[-2]
+            tokenized_source = self.tokenizer(source)["input_ids"]
+            if len(tokenized_source) <= self.max_source_length:
+                sources.append(source)
+            else:
+                sources.append(self.tokenizer.decode(tokenized_source[:self.max_source_length], skip_special_tokens=True))
+            source_lengths.append(min(len(tokenized_source), self.max_source_length))
+
+        labels = []; label_lengths = []
+        for instance in converted_batch:
+            label = instance["output"]
+            label = label.replace("\n", " ")
+            label = " ".join(label.split())
+            tokenized_label = self.tokenizer(label)["input_ids"]
+            if len(tokenized_label) <= self.max_target_length:
+                labels.append(label)
+            else:
+                labels.append(self.tokenizer.decode(tokenized_label[:self.max_target_length], skip_special_tokens=True))
+            label_lengths.append(min(len(tokenized_label), self.max_target_length))
+
+        inputs = [source + " " + label for source, label in zip(sources, labels)]
+
+        model_inputs = self.tokenizer(
+                text = inputs, 
+                max_length=self.max_source_length + self.max_target_length, 
+                padding=self.padding,
+                return_tensors=self.return_tensors, 
+                truncation=True)
+        
+        original_input_ids = self.tokenizer(
+                text = inputs, 
+                padding="longest",
+                return_tensors=self.return_tensors, 
+                truncation=True)["input_ids"]
+        model_inputs["original_input_ids"] = original_input_ids
+        
+        # prepare labels
+        model_inputs["labels"] = model_inputs["input_ids"].clone()
+        label_mask = model_inputs["attention_mask"].clone().bool()
+        model_inputs["labels"] = model_inputs["labels"].masked_fill(~label_mask, self.label_pad_token_id)
+        for i, length in enumerate(source_lengths):
+            model_inputs["labels"][i, :length] = self.label_pad_token_id    
+
+        # Add the graph data
+        batch_graphs = Batch.from_data_list(batch_graphs)
+        #batch_graphs.inputs = batch_graphs.inputs[0]
+        model_inputs["graph_data"] = batch_graphs        
+
+        if "weights" in converted_batch[0]:
+            model_inputs["weights"] = torch.Tensor([instance["weights"] for instance in converted_batch])
+
+        if "residuals" in converted_batch[0]:
+            model_inputs["residuals"] = torch.Tensor([instance["residuals"] for instance in converted_batch])
+        
+        return model_inputs
 class convert_format:
 
     def __call__(self, examples):

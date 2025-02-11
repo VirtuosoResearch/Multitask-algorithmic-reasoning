@@ -10,3 +10,6 @@ checkpoints/
 clean_snap.sh
 outputs/
 GraphGPT/
+clrs_jax/saved/
+clrs_jax/gradients/
+data/

@@ -31,6 +31,7 @@ from torch_geometric.data import Data
 import json
 import os.path as osp
 import glob
+import re
 
 # DEFAULT_GRAPH_TOKEN = "<graph>"
 # DEFAULT_G_START_TOKEN = "<g_start>"
@@ -195,14 +196,14 @@ class GraphLlamaModel(LlamaModel):
         return graph_tower
 
     def initialize_graph_modules(self, graph_tower, specs, cfg, use_cross_attn=True, 
-                                 num_soft_prompts=15, add_output_projection=True, 
+                                 add_output_projection=True, 
+                                 alignment_loss_weight=0.1,
                                  test_classifier_before_cross_attn=True, # only used for evaluating feature accuracy
                                  graph_select_layer=-1, pretrain_graph_mlp_adapter=None, fsdp=None):
         self.config.graph_tower = graph_tower
 
         if not hasattr(self, 'graph_tower'):
-            #graph_tower = GNN_Encoder(specs, cfg)
-            graph_tower = MultiTaskGIN(num_features=32)
+            graph_tower = GNN_Encoder(specs, cfg)
         else:
             graph_tower = self.graph_tower
         graph_tower.requires_grad_(True)
@@ -217,15 +218,15 @@ class GraphLlamaModel(LlamaModel):
 
         self.graph_projector = nn.Linear(cfg.MODEL.HIDDEN_DIM, self.config.hidden_size)
         self.graph_classifier = nn.Linear(self.config.hidden_size, cfg.MODEL.NUM_CLASSES) # only used for evaluating feature accuracy
+        self.alignment_loss_weight = alignment_loss_weight
         self.test_classifier_before_cross_attn = test_classifier_before_cross_attn
 
         if use_cross_attn:
-            self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
-            for i in range(num_soft_prompts):
-                self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
-
+            # This is setting up pseudo token embeddings for cross attention with graph features
+            # self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
+            # for i in range(num_soft_prompts):
+            #     self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
             self.graph_token_cross_attn = CrossAttention(self.config.hidden_size, num_heads=1, dropout=0.1, add_output_projection=add_output_projection)
-
     def init_gin(self, use_cross_attn=True, num_soft_prompts=15, add_output_projection=True, 
                  test_classifier_before_cross_attn=True, # only used for evaluating feature accuracy
                 graph_select_layer=-1, pretrain_graph_mlp_adapter=None, fsdp=None):
@@ -244,7 +245,7 @@ class GraphLlamaModel(LlamaModel):
         self.config.use_graph_proj = True
         self.config.graph_select_layer = graph_select_layer
 
-        self.graph_projector = nn.Linear(32, 32)
+        self.graph_projector = nn.Linear(32, self.config.hidden_size)
         self.graph_classifier = nn.Linear(self.config.hidden_size, 40) # only used for evaluating feature accuracy
         self.test_classifier_before_cross_attn = test_classifier_before_cross_attn
 
@@ -254,9 +255,9 @@ class GraphLlamaModel(LlamaModel):
                 self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
 
             self.graph_token_cross_attn = CrossAttention(self.config.hidden_size, num_heads=1, dropout=0.1, add_output_projection=add_output_projection)
-
     def forward(
-        self,
+        self, *,
+        task_name: str,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -268,6 +269,7 @@ class GraphLlamaModel(LlamaModel):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         graph_data: Optional[Data] = None,
+        original_input_ids: Optional[torch.LongTensor] = None,
         only_compute_graph_loss: Optional[bool] = False,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
 
@@ -277,19 +279,20 @@ class GraphLlamaModel(LlamaModel):
         #     orig_embeds_params = orig_embeds_params[0]
         #     with torch.no_grad():
         #         self.get_input_embeddings().weight.data[:-2] = orig_embeds_params[:-2].data
-
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
+            if original_input_ids is not None:
+                original_input_embeds = self.embed_tokens(original_input_ids)
 
         graph_tower = self.get_graph_tower()
-        graph_tower.train()
-        for param in graph_tower.parameters():
-            param.requires_grad = True  
-
-        #print(graph_tower)
-        #print(graph_data)
         if (graph_tower is not None) and (graph_data is not None): # and (input_ids.shape[1] != 1 or self.training)
-            graph_outputs = graph_tower(graph_data)            
+
+            task_name = re.sub(r'_zero_shot$', '', task_name)
+            graph_batch_ptr = graph_data.ptr
+            graph_outputs = graph_tower(graph_data, task_name)
+            graph_node_features = graph_tower.encode(graph_data, task_name)         
+            graph_node_features = self.graph_projector(graph_node_features)
+            dummy_graph_features = torch.zeros_like(graph_node_features[0]).unsqueeze(0)
             # compute graph classification loss
             #if self.test_classifier_before_cross_attn:
             graph_labels = graph_data.node_count
@@ -315,13 +318,17 @@ class GraphLlamaModel(LlamaModel):
                 graph_loss = F.cross_entropy(graph_outputs['degree_pred'], graph_labels)
                 graph_accuracy = (graph_outputs['degree_pred'].detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
             """
-            """
+            
             new_input_embeds = []
             cur_graph_idx = 0
             graph_patch_token = DEFAULT_GRAPH_PATCH_TOKEN
             for cur_input_ids, cur_input_embeds in zip(input_ids, inputs_embeds):
+                #print(cur_input_ids)
+                #print(graph_patch_token)
                 if (cur_input_ids == graph_patch_token).sum() == 0: # no patch token in the sequence
                     # this is training the bias of the projector
+                    #print("WARNING: no graph patch token in the input sequence")
+                    print(a)
                     cur_input_embeds = cur_input_embeds + (0. * dummy_graph_features).sum()
                     new_input_embeds.append(cur_input_embeds)
                     cur_graph_idx += 1
@@ -343,10 +350,8 @@ class GraphLlamaModel(LlamaModel):
                 
             assert cur_graph_idx == len(graph_data.ptr)-1
             inputs_embeds = torch.stack(new_input_embeds, dim=0)
-            """
 
         if only_compute_graph_loss:
-
             outputs = CausalLMOutputWithPast(loss=graph_loss)
             outputs.graph_loss = graph_loss
             outputs.graph_accuracy = graph_accuracy
@@ -357,6 +362,7 @@ class GraphLlamaModel(LlamaModel):
                 output_attentions=output_attentions, output_hidden_states=output_hidden_states, 
                 return_dict=return_dict
             )
+            #outputs.alignment_loss = graph_feature_distance*self.alignment_loss_weight
         return outputs
 
 
@@ -390,6 +396,7 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
 
     def forward(
         self,
+        task_name: str = None,
         input_ids: torch.LongTensor = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -402,6 +409,7 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
         return_dict: Optional[bool] = None,
         cache_position: Optional[torch.LongTensor] = None,
         graph_data: Optional[Data] = None,
+        original_input_ids: Optional[torch.LongTensor] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = output_attentions if output_attentions is not None else self.config.output_attentions
         output_hidden_states = (
@@ -411,6 +419,7 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs = self.model(
+            task_name = task_name,
             input_ids=input_ids,
             attention_mask=attention_mask,
             past_key_values=past_key_values,
@@ -420,6 +429,7 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
             output_hidden_states=output_hidden_states,
             return_dict=return_dict,
             graph_data = graph_data,
+            original_input_ids = original_input_ids,
             only_compute_graph_loss=self.only_train_graph,
             position_ids=position_ids,
             cache_position=cache_position,
@@ -443,6 +453,8 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
             # Enable model/pipeline parallelism
             shift_labels = shift_labels.to(shift_logits.device)
             loss = loss_fct(shift_logits, shift_labels)
+        #if original_input_ids is not None:
+        #    loss += outputs.alignment_loss
 
         if not return_dict:
             output = (logits,) + outputs[1:]
@@ -457,7 +469,9 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
         )
 
     def prepare_inputs_for_generation(
-        self, input_ids,
+        self, 
+        input_ids,
+        task_name,
         past_key_values=None,
         attention_mask=None,
         inputs_embeds=None,
@@ -496,9 +510,11 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
                 "use_cache": use_cache,
                 "attention_mask": attention_mask,
                 "graph_data": kwargs.get("graph_data", None),
+                "task_name": task_name,
             }
         )
         return model_inputs
+
 
 AutoConfig.register("GraphLlama", GraphLlamaConfig)
 AutoModelForCausalLM.register(GraphLlamaConfig, GraphLlamaForCausalLM_GraphQA)
