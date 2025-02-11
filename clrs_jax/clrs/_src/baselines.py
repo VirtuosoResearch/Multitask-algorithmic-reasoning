@@ -286,6 +286,9 @@ class BaselineModel(model.Model):
     extra_args[static_arg] = [4, 5] # TODO: check what this is
     self.jitted_compute_output_function_gradients = func(self._compute_output_function_gradients, donate_argnums=[0, 3],
                                 **extra_args)
+    extra_args[static_arg] = [4, 5] 
+    self.jitted_compute_output_function_values = func(self._compute_output_function_values, donate_argnums=[0, 3],
+                                **extra_args)
     extra_args[static_arg] = [3, 4, 5, 6]
     self.jitted_predict = func(self._predict, **extra_args)
     extra_args[static_arg] = [3, 4]
@@ -459,6 +462,24 @@ class BaselineModel(model.Model):
             return_all_outputs,
             is_graph_fts_avail))
   
+  def compute_output_function_values(self, rng_key: hk.PRNGSequence, feedback: _Feedback, is_graph_fts_avail: bool,
+               algorithm_index=None):
+    if algorithm_index is None:
+      assert len(self._spec) == 1
+      algorithm_index = 0
+    # Calculate and apply gradients.
+    rng_keys = _maybe_pmap_rng_key(rng_key)  # pytype: disable=wrong-arg-types  # numpy-scalars
+    feedback = _maybe_pmap_data(feedback)
+    outputs_list = self.jitted_compute_output_function_values(
+        self._device_params, rng_keys, feedback,
+        self._device_opt_state, algorithm_index, is_graph_fts_avail)
+    return outputs_list
+  
+  def _compute_output_function_values(self, params, rng_key, feedback, opt_state, algorithm_index, is_graph_fts_avail):
+    outputs_list = self._get_output_function_grads( 
+        params, rng_key, feedback, algorithm_index, is_graph_fts_avail)
+    return outputs_list
+  
   def compute_output_function_gradients(self, rng_key: hk.PRNGSequence, feedback: _Feedback, is_graph_fts_avail: bool,
                algorithm_index=None):
     if algorithm_index is None:
@@ -502,7 +523,13 @@ class BaselineModel(model.Model):
       if outputs is None: continue
       output_list.append(outputs)
 
-    for truth in feedback.features.hints:
+    if len(feedback.features.hints) > 2:
+      # sample a subset of hints
+      hint_indices = [0, 1,]
+    else:
+      hint_indices = range(len(feedback.features.hints))
+    for hint_index in hint_indices:
+      truth = feedback.features.hints[hint_index]
       outputs = losses.compute_hints_function_values(
             truth=truth,
             preds=[x[truth.name] for x in hint_preds],
@@ -527,7 +554,13 @@ class BaselineModel(model.Model):
       labels_list.append(labels)
       mask_list.append(mask)
 
-    for truth in feedback.features.hints:
+    if len(feedback.features.hints) > 2:
+      # sample a subset of hints
+      hint_indices = [0, 1,]
+    else:
+      hint_indices = range(len(feedback.features.hints))
+    for hint_index in hint_indices:
+      truth = feedback.features.hints[hint_index]
       labels = losses.compute_output_function_labels(truth=truth)
       if labels is None: continue
       labels = labels[1:]

@@ -204,7 +204,10 @@ def compute_output_function_values(truth: _DataPoint, pred: _Array, nb_nodes: in
   """Output function value for full-sample training."""
   EPS = 1e-4
 
-  if truth.type_ == _Type.SCALAR:
+  if truth._location == _Location.GRAPH:
+    outputs = None
+
+  elif truth.type_ == _Type.SCALAR:
     outputs = None # We don't consider regression loss in approximation
 
   elif truth.type_ == _Type.MASK:
@@ -252,7 +255,10 @@ def compute_output_function_labels(truth: _DataPoint) -> float:
   """Output function value for full-sample training."""
   key = jax.random.key(42)
 
-  if truth.type_ == _Type.SCALAR:
+  if truth._location == _Location.GRAPH:
+    labels = None
+
+  elif truth.type_ == _Type.SCALAR:
     labels = None
 
   elif truth.type_ == _Type.MASK:

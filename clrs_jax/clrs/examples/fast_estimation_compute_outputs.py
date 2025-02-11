@@ -135,7 +135,11 @@ flags.DEFINE_string('load_checkpoint_path', 'test',
                     'Path from which to load the checkpoint.')
 flags.DEFINE_integer('gradient_projection_seed', 0, 'Seed')
 flags.DEFINE_integer('gradient_projection_dim', 400, 'Dimension of the gradient projection')
-flags.DEFINE_integer('change_algo_index', 0, 'Index of the algorithm to change the checkpoint')
+
+flags.DEFINE_integer('runs', 10, "Runs")
+flags.DEFINE_integer('layer', 0, "Runs")
+flags.DEFINE_float('perturb_ratio', 0.01, 'Learning rate for the gradient projection')
+
 
 flags.DEFINE_boolean('use_branching_structure', False,
                      'Whether to define the branching structure of the model.')
@@ -536,138 +540,156 @@ def main(unused_argv):
         )
   else:
     train_model = eval_model
-
-  # Training loop.
-  best_score = -1.0
-  current_train_items = [0] * len(FLAGS.algorithms)
-  step = 0
-  next_eval = 0
-  # Make sure scores improve on first step, but not overcome best score
-  # until all algos have had at least one evaluation.
-  val_scores = [-99999.9] * len(FLAGS.algorithms)
   length_idx = 0
-  accum_loss = 0
 
   for algo_idx in range(len(train_samplers)):
     logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
   # Note: start training loop
   start_time = time.time()
 
-  def restore_model(model, file_name: str, change_algo_index=0):
+  def assign_to_model_parameters(model, params=None, layer=0):
     """Restore model from `file_name`."""
-    path = os.path.join(model.checkpoint_path, file_name)
-    new_params = {}
+    path = os.path.join(model.checkpoint_path, 'best.pkl')
     with open(path, 'rb') as f:
       restored_state = pickle.load(f)
       restored_params = restored_state['params']
-      for key in restored_params:
-        if "processor" in key:
-          new_params[key] = restored_params[key]
-        if "encoders_decoders" in key and "algo_{}".format(int(change_algo_index)) in key:
-          new_params[key.replace("algo_{}".format(int(change_algo_index)), "algo_{}".format(0))] = restored_params[key]
+      
+      if params is not None:
+        cur_len = 0
+        for key in restored_params.keys():
+            for param in restored_params[key]:
+              if 'processor' in key and "layer_norm" not in key:
+                if key[-1] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] and int(key[-1]) >= layer:
+                  cur_dim = np.prod(restored_params[key][param].shape)
+                  cur_param = params[cur_len:cur_len+cur_dim]
+                  restored_params[key][param] += np.reshape(cur_param, restored_params[key][param].shape)
+                  cur_len += cur_dim
 
-      model.params = hk.data_structures.merge(model.params, new_params)
-    logging.info('Model restored from %s', path)
-
-  while step < FLAGS.train_steps:
-    feedback_list = [next(t) for t in train_samplers]
-
-    # Initialize model.
-    if step == 0:
-      all_features = [f.features for f in feedback_list]
-      if FLAGS.chunked_training:
-        # We need to initialize the model with samples of all lengths for
-        # all algorithms. Also, we need to make sure that the order of these
-        # sample sizes is the same as the order of the actual training sizes.
-        all_length_features = [all_features] + [
-            [next(t).features for t in train_samplers]
-            for _ in range(len(train_lengths))]
-        train_model.init(all_length_features[:-1], FLAGS.seed + 1)
-      else:
-        train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
-
-      # Initialize projection matrix
-      gradient_dim = 0
-      for key in train_model.params:
-          for param in train_model.params[key]:
+      model.params = hk.data_structures.merge(model.params, restored_params)
+      model.opt_state = restored_state['opt_state']
+  
+  def get_pretrained_model_weights(model, layer=0):
+    path = os.path.join(model.checkpoint_path, 'best.pkl')
+    with open(path, 'rb') as f:
+      restored_state = pickle.load(f)
+      restored_params = restored_state['params']
+      
+      model_params = []
+      for key in restored_params.keys():
+          for param in restored_params[key]:
             if 'processor' in key and "layer_norm" not in key:
-              gradient_dim += np.prod(train_model.params[key][param].shape)
+              if key[-1] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] and int(key[-1]) >= layer:
+                model_params.append(restored_params[key][param].flatten())
+      return np.concatenate(model_params)
+    
+  def solve_logistic_regression(gradients, labels):
+    from sklearn.linear_model import LogisticRegression
+    clf = LogisticRegression(random_state=0).fit(gradients, labels)
+    logging.info('Logistic regression score: %s', clf.score(gradients, labels))
+    return clf.coef_
+    
+  def l2_norm(params):
+    return np.linalg.norm(params)
 
-      # collect gradients
-      gradients_dir = f"./gradients/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
-                    + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
-                    + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
-      if not os.path.exists(gradients_dir):
-        os.makedirs(gradients_dir)
-          
-      np.random.seed(FLAGS.gradient_projection_seed); project_dim = FLAGS.gradient_projection_dim
-      matrix_P = (2 * np.random.randint(2, size=(gradient_dim, project_dim)) - 1).astype(np.float32)
-      matrix_P *= 1 / np.sqrt(project_dim)
+  relative_errors = []
+  for run in range(FLAGS.runs):
+    step = 0
+    while step < FLAGS.train_steps:
+      feedback_list = [next(t) for t in train_samplers]
 
-      # load checkpoint 
-      restore_model(train_model, 'best.pkl', change_algo_index=FLAGS.change_algo_index)
-
-    # Training step. Note: if there are multiple samplers, it will apply one step per sampler
-    for algo_idx in range(len(train_samplers)):
-      feedback = feedback_list[algo_idx]
-      rng_key, new_rng_key = jax.random.split(rng_key)
-      if FLAGS.chunked_training:
-        # In chunked training, we must indicate which training length we are
-        # using, so the model uses the correct state.
-        length_and_algo_idx = (length_idx, algo_idx)
-      else:
-        # In non-chunked training, all training lengths can be treated equally,
-        # since there is no state to maintain between batches.
-        length_and_algo_idx = algo_idx
-      # Note: computing the loss follows: 
-      #     feedback --> jitted_feedback --> _feedback --> _loss + _update_params
-      # compute gradients
-      #     compute_output_function_gradients --> jitted_compute_output_function_value_grads --> _compute_output_function_gradients
-      gradients_list, labels_list, masks_list = train_model.compute_output_function_gradients(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
-      
-      def flatten_gradients(gradients, is_hints = False):
-        # length of gradients is 1
-        return_params = []
-        for name, params in gradients.items():
-          if "processor" in name and ("layer_norm" not in name):
-            params = jax.tree.flatten(params)[0]
-            if len(params[0].shape) == 4:
-              length, batch_size, num_nodes = params[0].shape[0], params[0].shape[1], params[0].shape[2]
-              params = [param.reshape(length, batch_size, num_nodes, -1) for param in params]
-              params = np.concatenate(params, axis=3)
-            elif len(params[0].shape) == 3:
-              batch_size, num_nodes = params[0].shape[0], params[0].shape[1]
-              params = [param.reshape(batch_size, num_nodes, -1) for param in params]
-              params = np.concatenate(params, axis=2)
-            else:
-              return []
-            return_params.append(params)
-        if len(return_params[0].shape) == 4:
-          return_params = np.concatenate(return_params, axis=3)
+      # Initialize model.
+      if step == 0:
+        all_features = [f.features for f in feedback_list]
+        if FLAGS.chunked_training:
+          # We need to initialize the model with samples of all lengths for
+          # all algorithms. Also, we need to make sure that the order of these
+          # sample sizes is the same as the order of the actual training sizes.
+          all_length_features = [all_features] + [
+              [next(t).features for t in train_samplers]
+              for _ in range(len(train_lengths))]
+          train_model.init(all_length_features[:-1], FLAGS.seed + 1)
         else:
-          return_params = np.concatenate(return_params, axis=2)
-        return return_params
-      
-      final_gradients = []; final_labels = []
-      for i, (gradients, labels, masks) in enumerate(zip(gradients_list, labels_list, masks_list)):
-        gradients = flatten_gradients(gradients, is_hints = (i>0))
-        if len(gradients) == 0:
-          continue
-        labels = np.array(labels, dtype=np.int32)
-        masks = np.array(masks, dtype=np.float32)
-        masks[masks == 0] = -1
-        gradients = gradients * masks.reshape(*masks.shape, 1)
-        gradients = gradients.reshape(-1, gradients.shape[-1])
-        labels = labels.reshape(-1)
-        final_gradients.append(gradients)
-        final_labels.append(labels)
-      final_gradients = np.concatenate(final_gradients, axis=0)
-      final_labels = np.concatenate(final_labels, axis=0)
-      final_gradients = final_gradients @ matrix_P
-      np.save(f"{gradients_dir}/gradients_{step}_algorithm_{algo_idx}.npy", final_gradients)
-      np.save(f"{gradients_dir}/labels_{step}_algorithm_{algo_idx}.npy", labels)
-    step += 1
+          train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
 
+        # Initialize projection matrix
+        gradient_dim = 0
+        for key in train_model.params:
+            for param in train_model.params[key]:
+              if 'processor' in key and "layer_norm" not in key:
+                if key[-1] in ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'] and int(key[-1]) >= FLAGS.layer:
+                  gradient_dim += np.prod(train_model.params[key][param].shape)
+
+        # collect gradients
+        gradients_dir = f"./gradients/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
+                      + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
+                      + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
+        if not os.path.exists(gradients_dir):
+          os.makedirs(gradients_dir)
+                    
+        np.random.seed(FLAGS.gradient_projection_seed); project_dim = FLAGS.gradient_projection_dim
+        matrix_P = (2 * np.random.randint(2, size=(gradient_dim, project_dim)) - 1).astype(np.float32)
+        matrix_P *= 1 / np.sqrt(project_dim)
+
+        # load gradients
+        gradients, labels = [], []; count = 0
+        for file in os.listdir(gradients_dir):
+          if "gradients" in file:
+            gradients.append(np.load(os.path.join(gradients_dir, file)))
+            count += 1
+            if count >= 20:
+              break
+        count = 0
+        for file in os.listdir(gradients_dir):
+          if "labels" in file:
+            labels.append(np.load(os.path.join(gradients_dir, file)))
+            count += 1
+            if count >= 20:
+              break
+        gradients = np.concatenate(gradients, axis=0)
+        labels = np.concatenate(labels, axis=0)
+        logging.info('Gradients shape: %s', gradients.shape)
+
+        coef = solve_logistic_regression(gradients, labels)
+        logging.info('Logistic regression weights: %s', l2_norm(coef.flatten()))
+        update_weight = coef.T.flatten() # matrix_P @
+
+        # load checkpoint 
+        train_model.restore_model('best.pkl', only_load_processor=False)
+
+        logging.info('Pretrained model weights: %s', l2_norm(get_pretrained_model_weights(train_model, FLAGS.layer)))
+        # update_weight = np.random.randn(gradient_dim)
+        update_weight = (update_weight / l2_norm(update_weight)) * (FLAGS.perturb_ratio * l2_norm(get_pretrained_model_weights(train_model, FLAGS.layer)))
+        logging.info('Update weight: %s', l2_norm(update_weight))
+
+      # Training step. Note: if there are multiple samplers, it will apply one step per sampler
+      for algo_idx in range(len(train_samplers)):
+        feedback = feedback_list[algo_idx]
+        rng_key, new_rng_key = jax.random.split(rng_key)
+        if FLAGS.chunked_training:
+          # In chunked training, we must indicate which training length we are
+          # using, so the model uses the correct state.
+          length_and_algo_idx = (length_idx, algo_idx)
+        else:
+          # In non-chunked training, all training lengths can be treated equally,
+          # since there is no state to maintain between batches.
+          length_and_algo_idx = algo_idx
+        # Note: computing the loss follows: 
+        #     feedback --> jitted_feedback --> _feedback --> _loss + _update_params
+        # compute gradients
+        #     compute_output_function_gradients --> jitted_compute_output_function_value_grads --> _compute_output_function_gradients
+        assign_to_model_parameters(train_model)
+        outputs_list_1 = train_model.compute_output_function_values(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
+
+        assign_to_model_parameters(train_model, update_weight, FLAGS.layer)
+        outputs_list_2 = train_model.compute_output_function_values(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
+        
+        for idx, outputs in enumerate(outputs_list_1):
+          error = l2_norm(outputs_list_1[idx] - outputs_list_2[idx])
+          relative_errors.append(np.square(error / l2_norm(outputs_list_1[idx])))
+      step += 1
+    logging.info("Relative errors: {} Stds: {}".format(np.mean(relative_errors), np.std(relative_errors)))
+
+  logging.info("Relative errors: {} Stds: {}".format(np.mean(relative_errors), np.std(relative_errors)))
   logging.info('Done!')
 
 
