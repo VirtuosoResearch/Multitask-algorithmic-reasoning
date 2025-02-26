@@ -631,17 +631,18 @@ def main(unused_argv):
         for name, params in gradients.items():
           if "processor" in name and ("layer_norm" not in name):
             params = jax.tree.flatten(params)[0]
-            if len(params[0].shape) == 4:
+            if len(params[0].shape) >= 4 and is_hints:
               length, batch_size, num_nodes = params[0].shape[0], params[0].shape[1], params[0].shape[2]
               params = [param.reshape(length, batch_size, num_nodes, -1) for param in params]
               params = np.concatenate(params, axis=3)
-            elif len(params[0].shape) == 3:
+            elif len(params[0].shape) == 3 or len(params[0].shape) == 4:
               batch_size, num_nodes = params[0].shape[0], params[0].shape[1]
               params = [param.reshape(batch_size, num_nodes, -1) for param in params]
               params = np.concatenate(params, axis=2)
             else:
               return []
             return_params.append(params)
+                    
         if len(return_params[0].shape) == 4:
           return_params = np.concatenate(return_params, axis=3)
         else:
