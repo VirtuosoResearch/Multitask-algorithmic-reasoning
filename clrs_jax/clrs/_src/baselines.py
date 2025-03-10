@@ -495,7 +495,7 @@ class BaselineModel(model.Model):
   
   def _compute_output_function_gradients(self, params, rng_key, feedback, opt_state, algorithm_index, is_graph_fts_avail):
     labels_list, masks_list = self._get_output_function_labels(feedback)
-    gradients_list = jax.jacobian(self._get_output_function_grads)( 
+    gradients_list = jax.jacrev(self._get_output_function_grads)( 
         params, rng_key, feedback, algorithm_index, is_graph_fts_avail)
     return gradients_list, labels_list, masks_list
   
@@ -525,7 +525,7 @@ class BaselineModel(model.Model):
 
     if len(feedback.features.hints) > 2:
       # sample a subset of hints
-      hint_indices = [0, 1,]
+      hint_indices = [0]
     else:
       hint_indices = range(len(feedback.features.hints))
     for hint_index in hint_indices:

@@ -453,40 +453,13 @@ def main(unused_argv):
    test_samplers, test_sample_counts,
    spec_list, is_graph_fts_avail) = create_samplers(rng, train_lengths)
 
-  if FLAGS.wandb_project:
-    if FLAGS.ood_val:
-        val_size = [32]
-    else:
-        val_size = [np.amax(train_lengths)]
-    config = {
-      "processor": FLAGS.processor_type,
-      "algorithm": FLAGS.algorithms[0],
-      "activation": FLAGS.activation,
-      "step_nums": FLAGS.train_steps,
-      "lr": FLAGS.learning_rate,
-      "batch_size": FLAGS.batch_size,
-      "nb_heads": FLAGS.nb_heads,
-      "num_layers": FLAGS.num_layers,
-      "hidden_size": FLAGS.hidden_size,
-      "attention_dropout_rate": FLAGS.attention_dropout_prob,
-      "norm_first_att": FLAGS.norm_first_att,
-      "seed_param": FLAGS.seed,
-      "readout": FLAGS.node_readout,
-      "ood_val": FLAGS.ood_val,
-      "val_size": val_size,
-    }
-    wandb.init(
-      entity=FLAGS.wandb_entity,
-      project=FLAGS.wandb_project,
-      name=FLAGS.wandb_name,
-      config={"dataset": "clrs30", **dict(config)},
-    )
-
+  # Load branching structure
   if FLAGS.use_branching_structure:
     branching_structure = load_branching_structure(FLAGS.branching_structure_dir, FLAGS.algorithms, FLAGS.num_layers)
   else:
     branching_structure = None
 
+  # Create model
   processor_factory = clrs.get_processor_factory(
       FLAGS.processor_type,
       use_ln=FLAGS.use_ln,
@@ -538,20 +511,13 @@ def main(unused_argv):
     train_model = eval_model
 
   # Training loop.
-  best_score = -1.0
-  current_train_items = [0] * len(FLAGS.algorithms)
   step = 0
-  next_eval = 0
   # Make sure scores improve on first step, but not overcome best score
   # until all algos have had at least one evaluation.
-  val_scores = [-99999.9] * len(FLAGS.algorithms)
   length_idx = 0
-  accum_loss = 0
 
   for algo_idx in range(len(train_samplers)):
     logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
-  # Note: start training loop
-  start_time = time.time()
 
   def restore_model(model, file_name: str, change_algo_index=0):
     """Restore model from `file_name`."""
@@ -575,16 +541,7 @@ def main(unused_argv):
     # Initialize model.
     if step == 0:
       all_features = [f.features for f in feedback_list]
-      if FLAGS.chunked_training:
-        # We need to initialize the model with samples of all lengths for
-        # all algorithms. Also, we need to make sure that the order of these
-        # sample sizes is the same as the order of the actual training sizes.
-        all_length_features = [all_features] + [
-            [next(t).features for t in train_samplers]
-            for _ in range(len(train_lengths))]
-        train_model.init(all_length_features[:-1], FLAGS.seed + 1)
-      else:
-        train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
+      train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
 
       # Initialize projection matrix
       gradient_dim = 0
@@ -611,26 +568,27 @@ def main(unused_argv):
     for algo_idx in range(len(train_samplers)):
       feedback = feedback_list[algo_idx]
       rng_key, new_rng_key = jax.random.split(rng_key)
-      if FLAGS.chunked_training:
-        # In chunked training, we must indicate which training length we are
-        # using, so the model uses the correct state.
-        length_and_algo_idx = (length_idx, algo_idx)
-      else:
-        # In non-chunked training, all training lengths can be treated equally,
-        # since there is no state to maintain between batches.
-        length_and_algo_idx = algo_idx
+      # In non-chunked training, all training lengths can be treated equally,
+      # since there is no state to maintain between batches.
+      length_and_algo_idx = algo_idx
       # Note: computing the loss follows: 
       #     feedback --> jitted_feedback --> _feedback --> _loss + _update_params
       # compute gradients
       #     compute_output_function_gradients --> jitted_compute_output_function_value_grads --> _compute_output_function_gradients
       gradients_list, labels_list, masks_list = train_model.compute_output_function_gradients(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
       
+      ''' Debug code '''
+      # # Gradients are a dictionary of dictionaries 
+      # for gradients in gradients_list:
+      #   for key in gradients:
+      #     print(key, list(gradients[key].keys()))
+      ''' Debug code '''
+
       def flatten_gradients(gradients, is_hints = False):
-        # length of gradients is 1
         return_params = []
         for name, params in gradients.items():
           if "processor" in name and ("layer_norm" not in name):
-            params = jax.tree.flatten(params)[0]
+            params = list(params.values())
             if len(params[0].shape) >= 4 and is_hints:
               length, batch_size, num_nodes = params[0].shape[0], params[0].shape[1], params[0].shape[2]
               params = [param.reshape(length, batch_size, num_nodes, -1) for param in params]
@@ -662,6 +620,7 @@ def main(unused_argv):
         labels = labels.reshape(-1)
         final_gradients.append(gradients)
         final_labels.append(labels)
+
       final_gradients = np.concatenate(final_gradients, axis=0)
       final_labels = np.concatenate(final_labels, axis=0)
       final_gradients = final_gradients @ matrix_P
