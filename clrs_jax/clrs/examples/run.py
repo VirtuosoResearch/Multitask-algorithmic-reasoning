@@ -30,8 +30,8 @@ import requests
 import tensorflow as tf
 import wandb
 
-from pynvml import *
 import time
+from clrs import utils
 
 flags.DEFINE_list('algorithms', ['dijkstra'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['16'],
@@ -402,23 +402,6 @@ def create_samplers(rng, train_lengths: List[int]):
           spec_list, is_graph_fts_avail)
 
 
-def print_gpu_utilization():
-    nvmlInit()
-    memory = 0
-    handle = nvmlDeviceGetHandleByIndex(0)
-    info = nvmlDeviceGetMemoryInfo(handle)
-    # print(info.used, info.total)
-    print(f"GPU memory occupied: {info.used//1024**2} MB.")
-    memory += info.used//1024**2
-
-    handle = nvmlDeviceGetHandleByIndex(1)
-    info = nvmlDeviceGetMemoryInfo(handle)
-    # print(info.used, info.total)
-    print(f"GPU memory occupied: {info.used//1024**2} MB.")
-    memory += info.used//1024**2
-    print(f"Total GPU memory occupied: {memory} MB.")
-
-
 def load_branching_structure(branching_structure_dir, algorithms, num_layers):
   """Load the branching structure of the model."""
   branching_structure = []
@@ -608,7 +591,7 @@ def main(unused_argv):
                    cur_loss, current_train_items[algo_idx])
       
       if step == 1:
-        print_gpu_utilization()
+        utils.print_gpu_utilization()
 
     # Periodically evaluate model
     if step >= next_eval:

@@ -555,8 +555,8 @@ class BaselineModel(model.Model):
       mask_list.append(mask)
 
     if len(feedback.features.hints) > 2:
-      # sample a subset of hints
-      hint_indices = [0, 1,]
+      # use the first hint for avoiding out of memory
+      hint_indices = [0,]
     else:
       hint_indices = range(len(feedback.features.hints))
     for hint_index in hint_indices:

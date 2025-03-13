@@ -48,6 +48,7 @@ from clrs._src.specs import Spec
 from clrs._src.specs import SPECS
 from clrs._src.specs import Stage
 from clrs._src.specs import Type
+import clrs.examples.utils as utils
 
 __version__ = "1.0.0"
 

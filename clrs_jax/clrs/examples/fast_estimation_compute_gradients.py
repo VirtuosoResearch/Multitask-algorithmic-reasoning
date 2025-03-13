@@ -17,8 +17,7 @@ import wandb
 import pickle
 import haiku as hk
 
-from pynvml import *
-import time
+from clrs import utils
 
 flags.DEFINE_list('algorithms', ['dijkstra'], 'Which algorithms to run.')
 flags.DEFINE_list('train_lengths', ['16'],
@@ -394,23 +393,6 @@ def create_samplers(rng, train_lengths: List[int]):
           spec_list, is_graph_fts_avail)
 
 
-def print_gpu_utilization():
-    nvmlInit()
-    memory = 0
-    handle = nvmlDeviceGetHandleByIndex(0)
-    info = nvmlDeviceGetMemoryInfo(handle)
-    # print(info.used, info.total)
-    print(f"GPU memory occupied: {info.used//1024**2} MB.")
-    memory += info.used//1024**2
-
-    handle = nvmlDeviceGetHandleByIndex(1)
-    info = nvmlDeviceGetMemoryInfo(handle)
-    # print(info.used, info.total)
-    print(f"GPU memory occupied: {info.used//1024**2} MB.")
-    memory += info.used//1024**2
-    print(f"Total GPU memory occupied: {memory} MB.")
-
-
 def load_branching_structure(branching_structure_dir, algorithms, num_layers):
   """Load the branching structure of the model."""
   branching_structure = []
@@ -519,22 +501,6 @@ def main(unused_argv):
   for algo_idx in range(len(train_samplers)):
     logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
 
-  def restore_model(model, file_name: str, change_algo_index=0):
-    """Restore model from `file_name`."""
-    path = os.path.join(model.checkpoint_path, file_name)
-    new_params = {}
-    with open(path, 'rb') as f:
-      restored_state = pickle.load(f)
-      restored_params = restored_state['params']
-      for key in restored_params:
-        if "processor" in key:
-          new_params[key] = restored_params[key]
-        if "encoders_decoders" in key and "algo_{}".format(int(change_algo_index)) in key:
-          new_params[key.replace("algo_{}".format(int(change_algo_index)), "algo_{}".format(0))] = restored_params[key]
-
-      model.params = hk.data_structures.merge(model.params, new_params)
-    logging.info('Model restored from %s', path)
-
   while step < FLAGS.train_steps:
     feedback_list = [next(t) for t in train_samplers]
 
@@ -562,7 +528,7 @@ def main(unused_argv):
       matrix_P *= 1 / np.sqrt(project_dim)
 
       # load checkpoint 
-      restore_model(train_model, 'best.pkl', change_algo_index=FLAGS.change_algo_index)
+      utils.restore_model(train_model, 'best.pkl', change_algo_index=FLAGS.change_algo_index)
 
     # Training step. Note: if there are multiple samplers, it will apply one step per sampler
     for algo_idx in range(len(train_samplers)):
@@ -618,8 +584,11 @@ def main(unused_argv):
         gradients = gradients * masks.reshape(*masks.shape, 1)
         gradients = gradients.reshape(-1, gradients.shape[-1])
         labels = labels.reshape(-1)
-        final_gradients.append(gradients)
-        final_labels.append(labels)
+        if len(gradients) == len(labels): 
+          final_gradients.append(gradients)
+          final_labels.append(labels)
+        else:
+          logging.info(f"Gradients and labels have different lengths: {len(gradients)} and {len(labels)}")
 
       final_gradients = np.concatenate(final_gradients, axis=0)
       final_labels = np.concatenate(final_labels, axis=0)
