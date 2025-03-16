@@ -144,7 +144,7 @@ flags.DEFINE_string('wandb_name', None,
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
 
-
+flags.DEFINE_integer('runs', 3, 'Number of runs to average over.')
 flags.DEFINE_boolean('use_branching_structure', False,
                      'Whether to define the branching structure of the model.')
 flags.DEFINE_string('branching_structure_dir', None,
@@ -517,172 +517,187 @@ def main(unused_argv):
   if not FLAGS.use_graph_fts:
       is_graph_fts_avail = [False] * len(is_graph_fts_avail)
 
-  eval_model = clrs.models.BaselineModel(
-      spec=spec_list,
-      dummy_trajectory=[next(t) for t in val_samplers],
-      **model_params
-  )
-  if FLAGS.chunked_training:
-    train_model = clrs.models.BaselineModelChunked(
+  # Run the training for multiple runs.
+  metrics = {}
+  for run in range(FLAGS.runs):
+    eval_model = clrs.models.BaselineModel(
         spec=spec_list,
-        dummy_trajectory=[next(t) for t in train_samplers],
+        dummy_trajectory=[next(t) for t in val_samplers],
         **model_params
-        )
-  else:
-    train_model = eval_model
+    )
+    if FLAGS.chunked_training:
+      train_model = clrs.models.BaselineModelChunked(
+          spec=spec_list,
+          dummy_trajectory=[next(t) for t in train_samplers],
+          **model_params
+          )
+    else:
+      train_model = eval_model
 
-  # Training loop.
-  best_score = -1.0
-  current_train_items = [0] * len(FLAGS.algorithms)
-  step = 0
-  next_eval = 0
-  # Make sure scores improve on first step, but not overcome best score
-  # until all algos have had at least one evaluation.
-  val_scores = [-99999.9] * len(FLAGS.algorithms)
-  length_idx = 0
-  accum_loss = 0
+    # Training loop.
+    best_score = -1.0
+    current_train_items = [0] * len(FLAGS.algorithms)
+    step = 0
+    next_eval = 0
+    # Make sure scores improve on first step, but not overcome best score
+    # until all algos have had at least one evaluation.
+    val_scores = [-99999.9] * len(FLAGS.algorithms)
+    length_idx = 0
+    accum_loss = 0
 
-  for algo_idx in range(len(train_samplers)):
-    logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
-  # Note: start training loop
-  start_time = time.time()
-  while step < FLAGS.train_steps:
-    feedback_list = [next(t) for t in train_samplers]
-
-    # Initialize model.
-    if step == 0:
-      all_features = [f.features for f in feedback_list]
-      if FLAGS.chunked_training:
-        # We need to initialize the model with samples of all lengths for
-        # all algorithms. Also, we need to make sure that the order of these
-        # sample sizes is the same as the order of the actual training sizes.
-        all_length_features = [all_features] + [
-            [next(t).features for t in train_samplers]
-            for _ in range(len(train_lengths))]
-        train_model.init(all_length_features[:-1], FLAGS.seed + 1)
-      else:
-        train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
-
-    # Training step. Note: if there are multiple samplers, it will apply one step per sampler
     for algo_idx in range(len(train_samplers)):
-      feedback = feedback_list[algo_idx]
-      rng_key, new_rng_key = jax.random.split(rng_key)
-      if FLAGS.chunked_training:
-        # In chunked training, we must indicate which training length we are
-        # using, so the model uses the correct state.
-        length_and_algo_idx = (length_idx, algo_idx)
-      else:
-        # In non-chunked training, all training lengths can be treated equally,
-        # since there is no state to maintain between batches.
-        length_and_algo_idx = algo_idx
-      # Note: computing the loss follows: 
-      #     feedback --> _feedback --> _loss + _update_params
-      cur_loss = train_model.feedback(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
-      accum_loss += cur_loss
-      rng_key = new_rng_key
+      logging.info(f"{FLAGS.algorithms[algo_idx]} has graph features: {is_graph_fts_avail[algo_idx]}")
+    # Note: start training loop
+    start_time = time.time()
+    while step < FLAGS.train_steps:
+      feedback_list = [next(t) for t in train_samplers]
 
-      if FLAGS.chunked_training:
-        examples_in_chunk = np.sum(feedback.features.is_last).item()
-      else:
-        examples_in_chunk = len(feedback.features.lengths)
-      current_train_items[algo_idx] += examples_in_chunk
-      logging.info('Algo %s step %i current loss %f, current_train_items %i.',
-                   FLAGS.algorithms[algo_idx], step,
-                   cur_loss, current_train_items[algo_idx])
-      
-      if step == 1:
-        utils.print_gpu_utilization()
+      # Initialize model.
+      if step == 0:
+        all_features = [f.features for f in feedback_list]
+        if FLAGS.chunked_training:
+          # We need to initialize the model with samples of all lengths for
+          # all algorithms. Also, we need to make sure that the order of these
+          # sample sizes is the same as the order of the actual training sizes.
+          all_length_features = [all_features] + [
+              [next(t).features for t in train_samplers]
+              for _ in range(len(train_lengths))]
+          train_model.init(all_length_features[:-1], FLAGS.seed + 1)
+        else:
+          train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
 
-    # Periodically evaluate model
-    if step >= next_eval:
-      eval_model.params = train_model.params
+      # Training step. Note: if there are multiple samplers, it will apply one step per sampler
       for algo_idx in range(len(train_samplers)):
-        common_extras = {'examples_seen': current_train_items[algo_idx],
-                         'step': step,
-                         'algorithm': FLAGS.algorithms[algo_idx]}
+        feedback = feedback_list[algo_idx]
+        rng_key, new_rng_key = jax.random.split(rng_key)
+        if FLAGS.chunked_training:
+          # In chunked training, we must indicate which training length we are
+          # using, so the model uses the correct state.
+          length_and_algo_idx = (length_idx, algo_idx)
+        else:
+          # In non-chunked training, all training lengths can be treated equally,
+          # since there is no state to maintain between batches.
+          length_and_algo_idx = algo_idx
+        # Note: computing the loss follows: 
+        #     feedback --> _feedback --> _loss + _update_params
+        cur_loss = train_model.feedback(rng_key, feedback, is_graph_fts_avail[algo_idx], length_and_algo_idx)
+        accum_loss += cur_loss
+        rng_key = new_rng_key
 
-        # Validation info.
-        new_rng_key, rng_key = jax.random.split(rng_key)
-        val_stats = collect_and_eval(
-            val_samplers[algo_idx],
-            functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-            val_sample_counts[algo_idx],
-            new_rng_key,
-            extras=common_extras)
-        logging.info('(val) algo %s step %d: %s',
-                     FLAGS.algorithms[algo_idx], step, val_stats)
-        val_scores[algo_idx] = val_stats['score']
-        if FLAGS.wandb_project:
-          if step > 0:
-            avg_loss = accum_loss / FLAGS.eval_every
-            wandb.log(
-                {
-                    "loss": avg_loss,
-                    "val_score": val_stats['score'],
-                }
-            )
+        if FLAGS.chunked_training:
+          examples_in_chunk = np.sum(feedback.features.is_last).item()
+        else:
+          examples_in_chunk = len(feedback.features.lengths)
+        current_train_items[algo_idx] += examples_in_chunk
+        logging.info('Algo %s step %i current loss %f, current_train_items %i.',
+                    FLAGS.algorithms[algo_idx], step,
+                    cur_loss, current_train_items[algo_idx])
+        
+        if step == 1:
+          utils.print_gpu_utilization()
 
-      next_eval += FLAGS.eval_every
+      # Periodically evaluate model
+      if step >= next_eval:
+        eval_model.params = train_model.params
+        for algo_idx in range(len(train_samplers)):
+          common_extras = {'examples_seen': current_train_items[algo_idx],
+                          'step': step,
+                          'algorithm': FLAGS.algorithms[algo_idx]}
 
-      # If best total score, update best checkpoint.
-      # Also save a best checkpoint on the first step.
-      msg = (f'best avg val score was '
-             f'{best_score/len(FLAGS.algorithms):.3f}, '
-             f'current avg val score is {np.mean(val_scores):.3f}, '
-             f'val scores are: ')
-      msg += ', '.join(
-          ['%s: %.3f' % (x, y) for (x, y) in zip(FLAGS.algorithms, val_scores)])
-      if (sum(val_scores) > best_score) or step == 0:
-        best_score = sum(val_scores)
-        logging.info('Checkpointing best model, %s', msg)
-        train_model.save_model('best.pkl')
-      else:
-        logging.info('Not saving new best model, %s', msg)
+          # Validation info.
+          new_rng_key, rng_key = jax.random.split(rng_key)
+          val_stats = collect_and_eval(
+              val_samplers[algo_idx],
+              functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
+              val_sample_counts[algo_idx],
+              new_rng_key,
+              extras=common_extras)
+          logging.info('(val) algo %s step %d: %s',
+                      FLAGS.algorithms[algo_idx], step, val_stats)
+          val_scores[algo_idx] = val_stats['score']
+          if FLAGS.wandb_project:
+            if step > 0:
+              avg_loss = accum_loss / FLAGS.eval_every
+              wandb.log(
+                  {
+                      "loss": avg_loss,
+                      "val_score": val_stats['score'],
+                  }
+              )
 
-      accum_loss = 0
-      avg_loss = 0
+        next_eval += FLAGS.eval_every
 
-    step += 1
-    length_idx = (length_idx + 1) % len(train_lengths)
-  emd_time = time.time()
-  logging.info(f"Training time: {emd_time - start_time} seconds.")
+        # If best total score, update best checkpoint.
+        # Also save a best checkpoint on the first step.
+        msg = (f'best avg val score was '
+              f'{best_score/len(FLAGS.algorithms):.3f}, '
+              f'current avg val score is {np.mean(val_scores):.3f}, '
+              f'val scores are: ')
+        msg += ', '.join(
+            ['%s: %.3f' % (x, y) for (x, y) in zip(FLAGS.algorithms, val_scores)])
+        if (sum(val_scores) > best_score) or step == 0:
+          best_score = sum(val_scores)
+          logging.info('Checkpointing best model, %s', msg)
+          train_model.save_model('best.pkl')
+        else:
+          logging.info('Not saving new best model, %s', msg)
 
-  logging.info(f'Restoring best model from checkpoint {checkpoint_path}...')
-  eval_model.restore_model('best.pkl', only_load_processor=False)
+        accum_loss = 0
+        avg_loss = 0
 
-  for algo_idx in range(len(train_samplers)):
-    common_extras = {'examples_seen': current_train_items[algo_idx],
-                      'step': step,
-                      'algorithm': FLAGS.algorithms[algo_idx]}
+      step += 1
+      length_idx = (length_idx + 1) % len(train_lengths)
+    emd_time = time.time()
+    logging.info(f"Training time: {emd_time - start_time} seconds.")
 
-    # Validation info.
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    val_stats = collect_and_eval(
-        val_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-        val_sample_counts[algo_idx],
-        new_rng_key,
-        extras=common_extras)
-    logging.info('(val) algo %s step %d: %s',
-                  FLAGS.algorithms[algo_idx], step, val_stats)
+    logging.info(f'Restoring best model from checkpoint {checkpoint_path}...')
+    eval_model.restore_model('best.pkl', only_load_processor=False)
 
-    common_extras = {'examples_seen': current_train_items[algo_idx],
-                     'step': step,
-                     'algorithm': FLAGS.algorithms[algo_idx]}
+    for algo_idx in range(len(train_samplers)):
+      # common_extras = {'examples_seen': current_train_items[algo_idx],
+      #                   'step': step,
+      #                   'algorithm': FLAGS.algorithms[algo_idx]}
 
-    new_rng_key, rng_key = jax.random.split(rng_key)
-    test_stats = collect_and_eval(
-        test_samplers[algo_idx],
-        functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
-        test_sample_counts[algo_idx],
-        new_rng_key,
-        extras=common_extras)
-    logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
-    if FLAGS.wandb_project:
-        wandb.log({"test_score": test_stats['score']})
+      # Validation info.
+      new_rng_key, rng_key = jax.random.split(rng_key)
+      val_stats = collect_and_eval(
+          val_samplers[algo_idx],
+          functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
+          val_sample_counts[algo_idx],
+          new_rng_key,
+          extras={})
+      logging.info('(val) algo %s step %d: %s',
+                    FLAGS.algorithms[algo_idx], step, val_stats)
 
-  logging.info('Done!')
+      new_rng_key, rng_key = jax.random.split(rng_key)
+      test_stats = collect_and_eval(
+          test_samplers[algo_idx],
+          functools.partial(eval_model.predict, algorithm_index=algo_idx, is_graph_fts_avail=is_graph_fts_avail[algo_idx]),
+          test_sample_counts[algo_idx],
+          new_rng_key,
+          extras={})
+      logging.info('(test) algo %s : %s', FLAGS.algorithms[algo_idx], test_stats)
+      if FLAGS.wandb_project:
+          wandb.log({"test_score": test_stats['score']})
 
+      # update stats into metrics
+      for k, v in val_stats.items():
+        key = f'val_{FLAGS.algorithms[algo_idx]}_{k}'
+        if key in metrics:
+          metrics[key].append(v)
+        else:
+          metrics[f'val_{FLAGS.algorithms[algo_idx]}_{k}'] = [v]
+      for k, v in test_stats.items():
+        key = f'test_{FLAGS.algorithms[algo_idx]}_{k}'
+        if key in metrics:
+          metrics[key].append(v)
+        else:
+          metrics[f'test_{FLAGS.algorithms[algo_idx]}_{k}'] = [v]
+
+    logging.info(f'Done run {run}!')
+
+  for key in metrics:
+    logging.info('{}: {:.6f} +- {:.6f}'.format(key, np.mean(metrics[key]), np.std(metrics[key])))
 
 if __name__ == '__main__':
   app.run(main)
