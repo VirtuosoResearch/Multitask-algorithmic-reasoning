@@ -73,12 +73,14 @@ def restore_model(model, file_name: str, change_algo_index=0):
     with open(path, 'rb') as f:
       restored_state = pickle.load(f)
       restored_params = restored_state['params']
-      for key in restored_params:
-        if "processor" in key:
-          new_params[key] = restored_params[key]
-        if "encoders_decoders" in key and "algo_{}".format(int(change_algo_index)) in key:
-          new_params[key.replace("algo_{}".format(int(change_algo_index)), "algo_{}".format(0))] = restored_params[key]
-
+      if change_algo_index is not None:
+        for key in restored_params:
+          if "processor" in key:
+            new_params[key] = restored_params[key]
+          if "encoders_decoders" in key and ("algo_{}".format(int(change_algo_index)) in key):
+            new_params[key.replace("algo_{}".format(int(change_algo_index)), "algo_{}".format(0))] = restored_params[key]
+      else:
+        new_params = restored_params
       model.params = hk.data_structures.merge(model.params, new_params)
     logging.info('Model restored from %s', path)
 
