@@ -151,7 +151,9 @@ class BaselineModel(model.Model):
       learning_rate: float = 0.005,
       grad_clip_max_norm: float = 0.0,
       checkpoint_path: str = '/tmp/clrs3',
+      processor_type: str = 'mpnn',
       freeze_processor: bool = False,
+      freeze_layers: int = 0,
       dropout_prob: float = 0.0,
       hint_teacher_forcing: float = 0.0,
       hint_repred_mode: str = 'soft',
@@ -222,7 +224,9 @@ class BaselineModel(model.Model):
     self.decode_hints = decode_hints
     self.checkpoint_path = checkpoint_path
     self.name = name
+    self.processor_type = processor_type
     self._freeze_processor = freeze_processor
+    self.freeze_layers = freeze_layers
     if grad_clip_max_norm != 0.0:
       optax_chain = [optax.clip_by_global_norm(grad_clip_max_norm),
                      optax.scale_by_adam(),
@@ -576,10 +580,13 @@ class BaselineModel(model.Model):
     updates, opt_state = filter_null_grads(
         grads, self.opt, opt_state, self.opt_state_skeleton, algorithm_index)
     if self._freeze_processor:
-      params_subset = _filter_out_processor(params)
-      updates_subset = _filter_out_processor(updates)
+      params_subset = _filter_out_processor(params, layer_threshold=self.freeze_layers, model_type=self.processor_type)
+      updates_subset = _filter_out_processor(updates, layer_threshold=self.freeze_layers, model_type=self.processor_type)
       assert len(params) > len(params_subset)
       assert params_subset
+      print("Only updating the following layers:")
+      for key in params_subset.keys():
+        print(key)
       new_params = optax.apply_updates(params_subset, updates_subset)
       new_params = hk.data_structures.merge(params, new_params)
     else:
@@ -591,7 +598,7 @@ class BaselineModel(model.Model):
     grads = _maybe_put_replicated(grads)
     self._device_params, self._device_opt_state = self.jitted_accum_opt_update(
         self._device_params, grads, self._device_opt_state, self.opt,
-        self._freeze_processor)
+        self._freeze_processor, self.freeze_layers, self.processor_type)
 
   def verbose_loss(self, feedback: _Feedback, extra_info) -> Dict[str, _Array]:
     """Gets verbose loss information."""
@@ -831,12 +838,35 @@ def _nb_nodes(feedback: _Feedback, is_chunked) -> int:
 
 
 def _param_in_processor(module_name):
-  return processors.PROCESSOR_TAG in module_name
+  return (processors.PROCESSOR_TAG in module_name) and ("layer_norm" not in module_name)
 
+def filter_layers(key, layer_threshold, model_type = "mpnn"):
+    '''
+    return True if the key is located beyond the layer_threshold
+    '''
+    if model_type == "mpnn":
+        key_word = "linear"
+    elif model_type == "edge_t":
+        key_word = "ET_Layer"
+    else:
+        raise ValueError("model_type must be either 'mpnn' or 'edge_t'")
+    
+    if ('processor' in key) and (key_word in key) and "layer_norm" not in key:
+        key_word_index = key.index(key_word)
+        if key[(key_word_index + len(key_word))%len(key)] == "_":
+            cur_layer = int(key[key_word_index + len(key_word)+1])
+        else:
+            cur_layer = 0
+        
+        if int(cur_layer) >= layer_threshold:
+            return True
+        
+    return False
 
-def _filter_out_processor(params: hk.Params) -> hk.Params:
+def _filter_out_processor(params: hk.Params, layer_threshold=0, model_type = "mpnn") -> hk.Params:
   return hk.data_structures.filter(
-      lambda module_name, n, v: not _param_in_processor(module_name), params)
+      lambda module_name, n, v: (not _param_in_processor(module_name) or filter_layers(module_name, layer_threshold, model_type)),
+      params)
 
 
 def _filter_in_processor(params: hk.Params) -> hk.Params:
@@ -851,17 +881,17 @@ def _is_not_done_broadcast(lengths, i, tensor):
   return is_not_done
 
 
-def accum_opt_update(params, grads, opt_state, opt, freeze_processor):
+def accum_opt_update(params, grads, opt_state, opt, freeze_processor, freeze_layers=0, processor_type="mpnn"):
   """Update params from gradients collected from several algorithms."""
   # Average the gradients over all algos
   grads = jax.tree_util.tree_map(
       lambda *x: sum(x) / (sum([jnp.any(k) for k in x]) + 1e-12), *grads)
   updates, opt_state = opt.update(grads, opt_state)
   if freeze_processor:
-    params_subset = _filter_out_processor(params)
+    params_subset = _filter_out_processor(params, layer_threshold=freeze_layers, model_type=processor_type)
     assert len(params) > len(params_subset)
     assert params_subset
-    updates_subset = _filter_out_processor(updates)
+    updates_subset = _filter_out_processor(updates, layer_threshold=freeze_layers, model_type=processor_type)
     new_params = optax.apply_updates(params_subset, updates_subset)
     new_params = hk.data_structures.merge(params, new_params)
   else:

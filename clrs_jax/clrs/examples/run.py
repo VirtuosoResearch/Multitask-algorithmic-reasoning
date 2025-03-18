@@ -143,6 +143,8 @@ flags.DEFINE_string('wandb_name', None,
                     'Name of `wandb` run.')
 flags.DEFINE_boolean('freeze_processor', False,
                      'Whether to freeze the processor of the model.')
+flags.DEFINE_integer('freeze_layers', 0, 'Layer to freeze in the processor.')
+flags.DEFINE_string('load_checkpoint_path', 'test', 'Path from which to load the checkpoint.')
 
 flags.DEFINE_integer('runs', 3, 'Number of runs to average over.')
 flags.DEFINE_boolean('use_branching_structure', False,
@@ -501,7 +503,9 @@ def main(unused_argv):
       learning_rate=FLAGS.learning_rate,
       grad_clip_max_norm=FLAGS.grad_clip_max_norm,
       checkpoint_path=checkpoint_path,
+      processor_type=FLAGS.processor_type,
       freeze_processor=FLAGS.freeze_processor,
+      freeze_layers=FLAGS.freeze_layers,
       dropout_prob=FLAGS.dropout_prob,
       hint_teacher_forcing=FLAGS.hint_teacher_forcing,
       hint_repred_mode=FLAGS.hint_repred_mode,
@@ -565,6 +569,15 @@ def main(unused_argv):
           train_model.init(all_length_features[:-1], FLAGS.seed + 1)
         else:
           train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
+
+        load_checkpoint_path = os.path.join(FLAGS.checkpoint_path, FLAGS.load_checkpoint_path)
+        if os.path.exists(load_checkpoint_path):
+          train_model.checkpoint_path = load_checkpoint_path
+          utils.assign_to_model_parameters(train_model, train_model.params)
+          logging.info(f"Restored model from {load_checkpoint_path}")
+        else:
+          logging.info(f"Model initialized from scratch.")
+        train_model.checkpoint_path = checkpoint_path
 
       # Training step. Note: if there are multiple samplers, it will apply one step per sampler
       for algo_idx in range(len(train_samplers)):
