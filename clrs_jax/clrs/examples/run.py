@@ -697,7 +697,7 @@ def main(unused_argv):
     logging.info(f'Done run {run}!')
 
   for key in metrics:
-    logging.info('{}: {:.6f} +- {:.6f}'.format(key, np.mean(metrics[key]), np.std(metrics[key])))
+    logging.info('{}: {:.4f} +- {:.4f}'.format(key, np.mean(metrics[key]), np.std(metrics[key])))
 
 if __name__ == '__main__':
   app.run(main)
