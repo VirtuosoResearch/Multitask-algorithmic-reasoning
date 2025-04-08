@@ -32,6 +32,9 @@ from adapters import AutoAdapterModel,list_adapters, BnConfig
 from torch._inductor.async_compile import AsyncCompile
 import re
 
+# Import branching LoRA module
+from src.model.branching_lora import BranchingLoraModel, create_branching_lora_model
+
 logging.basicConfig(level=logging.INFO, force=True)
 torch.set_float32_matmul_precision("high")
 
@@ -155,6 +158,33 @@ def initialize_model(args):
         model = get_peft_model(model, config)
 
         model.print_trainable_parameters()
+        
+    elif args.train_branching_lora:
+        if args.branching_lora_config is None:
+            raise ValueError("--branching_lora_config must be specified when using --train_branching_lora")
+        
+        # Determine target modules based on model architecture
+        if args.model_key == "gpt2":
+            target_modules = ["c_attn", "c_proj", "c_fc"]
+        elif args.model_key == "EleutherAI/gpt-neox-20b":
+            target_modules = ["query_key_value"]
+        elif "flan" in args.model_key:
+            target_modules = ["q", "k", "v"]
+        else:
+            target_modules = ["q_proj", "k_proj", "v_proj"]
+        
+        # Create branching LoRA model
+        model = create_branching_lora_model(
+            base_model=model,
+            branching_config_path=args.branching_lora_config,
+            lora_rank=args.lora_rank,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=0.1,
+            target_modules=target_modules
+        )
+        
+        model.print_trainable_parameters()
+        print("-" * 20, "Branching LoRA", "-" * 20)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -198,6 +228,9 @@ if __name__ == "__main__":
     parser.add_argument("--train_adapter", action="store_true")
     parser.add_argument("--reduction_factor", type=int, default=128)
     parser.add_argument("--use_qadapter", action="store_true")
+    
+    parser.add_argument("--train_branching_lora", action="store_true")
+    parser.add_argument("--branching_lora_config", type=str, default=None, help="Path to branching LoRA config JSON file")
 
     parser.add_argument("--use_3bit", action="store_true")
     parser.add_argument("--use_2bit", action="store_true")
@@ -206,6 +239,8 @@ if __name__ == "__main__":
     parser.add_argument("--runs", type=int, default=3)
 
     parser.add_argument("--load_model_dir", type=str, default="test")
+    parser.add_argument("--load_branching_config", type=str)
+    parser.add_argument("--task_branching_config_dir", type=str)
     parser.add_argument("--write_results", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--generate_output", action="store_true")
@@ -267,6 +302,21 @@ if __name__ == "__main__":
             elif ("pt" in load_model_dir) and os.path.exists(load_model_dir):
                 print(model.load_state_dict(torch.load(load_model_dir), strict=False))
                 print(f"Loaded model from {load_model_dir}")
+                
+        if args.load_branching_config:
+            # load weights from different trained adapters
+            if args.task_branching_config_dir is not None:
+                task_branching_config_dir = os.path.join("branching_configs", args.task_branching_config_dir)
+                with open(task_branching_config_dir, "r") as f:
+                    for line in f.readlines():
+                        layers, checkpoint_dir = line.split(":")
+                        layers = layers.split(",")
+                        checkpoint = torch.load(checkpoint_dir)
+                        new_checkpoint = {}
+                        for key, val in checkpoint.items():
+                            if str(layer_index_from_name(key)) in layers:
+                                new_checkpoint[key] = val
+                        model.load_state_dict(new_checkpoint, strict=False)
 
         if not os.path.exists("external_lightning_logs"):
             raise Exception("external_lightning_logs/ does not exist")
@@ -300,6 +350,14 @@ if __name__ == "__main__":
             state_dict = model.state_dict()
             state_dict = {k: v.clone() for k, v in state_dict.items() if "lora" in k}
             torch.save(state_dict, model_path)
+        elif args.train_branching_lora:
+            if not os.path.exists(default_root_dir):
+                os.makedirs(default_root_dir)
+            model_path = default_root_dir + "/initial_weights.pt"
+            state_dict = model.state_dict()
+            # Save all branching LoRA parameters
+            state_dict = {k: v.clone() for k, v in state_dict.items() if "lora_branches" in k}
+            torch.save(state_dict, model_path)
 
         start_time = time.time()
         if args.epochs > 0:
@@ -309,6 +367,12 @@ if __name__ == "__main__":
                 checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
                 state_dict = checkpoint["state_dict"]
                 state_dict = {k[6:]: v for k, v in state_dict.items() if "lora" in k}
+                torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
+            elif args.train_branching_lora:
+                from lightning_fabric.utilities.cloud_io import _load as pl_load
+                checkpoint = pl_load(checkpoint_callback.best_model_path, map_location=lm.device)
+                state_dict = checkpoint["state_dict"]
+                state_dict = {k[6:]: v for k, v in state_dict.items() if "lora_branches" in k}
                 torch.save(state_dict, checkpoint_callback.best_model_path.replace(".ckpt", ".pt"))
             elif args.train_adapter:
                 from lightning_fabric.utilities.cloud_io import _load as pl_load
@@ -323,9 +387,9 @@ if __name__ == "__main__":
         start_time = time.time()
             
         if args.epochs > 0:
-            if args.train_lora or args.train_adapter or \
+            if args.train_lora or args.train_branching_lora or args.train_adapter or \
                 args.use_qadapter or args.use_qlora or \
-                args.use_3bit or args.use_2bit:                         
+                args.use_3bit or args.use_2bit:                                
                 model, tokenizer, hf_key, model_type, append_eos = initialize_model(args)
                 model.load_state_dict(state_dict, strict=False)
                 lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
@@ -364,7 +428,7 @@ if __name__ == "__main__":
             metrics[key].append(summary[key])
 
         # delete the whole model checkpoint and only keep the lora parameters
-        if args.train_lora or args.train_adapter:
+        if args.train_lora or args.train_branching_lora or args.train_adapter:
             os.system(f"rm {checkpoint_callback.best_model_path}")
     
     for key in metrics:

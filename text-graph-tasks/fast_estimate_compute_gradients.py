@@ -3,6 +3,8 @@ import logging
 import os
 import wandb
 
+from src.custom.graphwiz_task_data_module import GraphWizDataModule
+from src.custom.algorithm_task_data_module import AlgorithmDataModule
 from src.custom.clrs_text_task_data_module import TextCLRSDataModule
 from src.custom.clrs_text_task_graph_data_module import TextGraphCLRSDataModule
 
@@ -249,7 +251,16 @@ def initialize_model(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--load_text_clrs", action="store_true")
     parser.add_argument("--task_names", type=str, nargs="+", default=['dfs']) 
+    
+    parser.add_argument("--load_graph_qa", action="store_true")
+    parser.add_argument("--graph_types", type=str, nargs="+", default=['er'])
+    parser.add_argument("--text_encoders", type=str, nargs="+", default=['adjacency']) 
+    parser.add_argument("--min_nodes", type=int, default=20)
+    parser.add_argument("--max_nodes", type=int, default=30)
+    
+    parser.add_argument("--load_graphwiz", action="store_true")
     
     parser.add_argument("--model_key", type=str, default="gpt2")
     parser.add_argument("--batch_size", type=int, default=8)
@@ -341,23 +352,52 @@ if __name__ == "__main__":
     else:
         inference_batch_size = args.inference_batch_size
 
-    data_module = TextCLRSDataModule(
-            task_names=args.task_names,
-            tokenizer=tokenizer,
-            batch_size=batch_size,
-            inference_batch_size=inference_batch_size,
-            max_input_length=args.max_length,
-            max_output_length=args.max_output_length,
-            eval_all=True,
-            eval_split=args.eval_split,
-            downsample_ratio=args.downsample_ratio,
-            minimum_samples=args.minimum_samples,
-            minimum_samples_validation=args.minimum_samples_validation,
-            train_lengths=args.train_lengths,
-            test_lengths=args.test_lengths,
-            use_few_shot=(args.few_shot_k > 0), 
-            few_shot_k=args.few_shot_k,
-            only_answer_output=args.only_answer_output)
+    if args.load_text_clrs:
+        data_module = TextCLRSDataModule(
+                task_names=args.task_names,
+                tokenizer=tokenizer,
+                batch_size=batch_size,
+                inference_batch_size=inference_batch_size,
+                max_input_length=args.max_length,
+                max_output_length=args.max_output_length,
+                eval_all=True,
+                eval_split=args.eval_split,
+                downsample_ratio=args.downsample_ratio,
+                minimum_samples=args.minimum_samples,
+                minimum_samples_validation=args.minimum_samples_validation,
+                train_lengths=args.train_lengths,
+                test_lengths=args.test_lengths,
+                use_few_shot=(args.few_shot_k > 0), 
+                few_shot_k=args.few_shot_k,
+                only_answer_output=args.only_answer_output)
+    elif args.load_graph_qa: 
+        data_module = AlgorithmDataModule(
+                    task_names=args.task_names,
+                    graph_types=args.graph_types,
+                    text_encoders=args.text_encoders,
+                    node_range=[args.min_nodes, args.max_nodes],
+                    tokenizer=tokenizer,
+                    batch_size=batch_size,
+                    inference_batch_size=inference_batch_size,
+                    max_input_length=args.max_length,
+                    max_output_length=args.max_output_length,
+                    eval_all=True,
+                    downsample_ratio=args.downsample_ratio,
+                    minimum_samples=args.minimum_samples,
+                    minimum_samples_validation=args.minimum_samples_validation)
+    elif args.load_graphwiz:
+        data_module = GraphWizDataModule(
+                task_names=args.task_names,
+                tokenizer=tokenizer,
+                batch_size=batch_size,
+                inference_batch_size=inference_batch_size,
+                max_input_length=args.max_length,
+                max_output_length=args.max_output_length,
+                eval_all=True,
+                eval_split=args.eval_split,
+                downsample_ratio=args.downsample_ratio,
+                minimum_samples=args.minimum_samples,
+                minimum_samples_validation=args.minimum_samples_validation)
     data_module.setup(stage="fit")
     for name, param in model.named_parameters():
         if param.requires_grad:

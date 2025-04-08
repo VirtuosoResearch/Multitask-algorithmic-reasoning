@@ -15,6 +15,7 @@ from src.utils.compute_metrics import compute_accuracy
 from pynvml import *
 from src.utils.math_utils import eval_results_math, eval_results_gsm8k
 import re
+from src.model.branching_lora import BranchingLoraModel
 
 def print_gpu_utilization():
     nvmlInit()
@@ -189,6 +190,8 @@ class MultitaskModel(pl.LightningModule):
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
         if self.train_invariant_mix:
             kwargs["invariant_mask"] = batch["invariant_mask"]
+        if isinstance(self.model, BranchingLoraModel):
+            kwargs["task_name"] = task_name
         
         if self.use_sample_weights:
             logits = self.model(**kwargs)["logits"]
@@ -246,6 +249,8 @@ class MultitaskModel(pl.LightningModule):
             kwargs["original_input_ids"] = batch["original_input_ids"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
+        if isinstance(self.model, BranchingLoraModel):
+            kwargs["task_name"] = task_name
         forward_output = self.model(**kwargs)
 
         if batch_idx == 1:
@@ -292,9 +297,15 @@ class MultitaskModel(pl.LightningModule):
                     self.tokenizer.padding_side = 'right'
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-                    output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_new_tokens=self.max_output_length,
-                                                pad_token_id=self.tokenizer.pad_token_id,
-                                                eos_token_id=self.tokenizer.eos_token_id).detach()
+                    # Support for branching LoRA: pass task_name if model supports it
+                    if isinstance(self.model, BranchingLoraModel):
+                        output = self.model.generate(**inputs, graph_data=batch["graph_data"], task_name=task_name, max_new_tokens=self.max_output_length,
+                                                    pad_token_id=self.tokenizer.pad_token_id,
+                                                    eos_token_id=self.tokenizer.eos_token_id).detach()
+                    else:
+                        output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_new_tokens=self.max_output_length,
+                                                    pad_token_id=self.tokenizer.pad_token_id,
+                                                    eos_token_id=self.tokenizer.eos_token_id).detach()
                 else:
                     # convert to left padding
                     inputs = self.tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
@@ -302,11 +313,19 @@ class MultitaskModel(pl.LightningModule):
                     inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
                     self.tokenizer.padding_side = 'right'
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
-                    output = self.model.generate(**inputs, max_new_tokens=self.max_output_length,
-                                                pad_token_id=self.tokenizer.pad_token_id,
-                                                eos_token_id=self.tokenizer.eos_token_id,
-                                                do_sample=True, temperature=1.0
-                                                ).detach()
+                    # Support for branching LoRA: pass task_name if model supports it
+                    if isinstance(self.model, BranchingLoraModel):
+                        output = self.model.generate(**inputs, task_name=task_name, max_new_tokens=self.max_output_length,
+                                                    pad_token_id=self.tokenizer.pad_token_id,
+                                                    eos_token_id=self.tokenizer.eos_token_id,
+                                                    do_sample=True, temperature=1.0
+                                                    ).detach()
+                    else:
+                        output = self.model.generate(**inputs, max_new_tokens=self.max_output_length,
+                                                    pad_token_id=self.tokenizer.pad_token_id,
+                                                    eos_token_id=self.tokenizer.eos_token_id,
+                                                    do_sample=True, temperature=1.0
+                                                    ).detach()
                 input_len = inputs["input_ids"].shape[1]
                 output[:, :input_len] = self.tokenizer.pad_token_id
                 if not self.evaluate_cot:
@@ -355,6 +374,8 @@ class MultitaskModel(pl.LightningModule):
             kwargs["original_input_ids"] = batch["original_input_ids"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
+        if isinstance(self.model, BranchingLoraModel):
+            kwargs["task_name"] = task_name
         forward_output = self.model(**kwargs)
 
         assert self.model_type == "decoder", "Only decoder model type is supported for prediction"
@@ -615,6 +636,11 @@ class MultitaskModel(pl.LightningModule):
             kwargs["original_input_ids"] = batch["original_input_ids"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
+        
+        # Support for branching LoRA: pass task_name if model supports it
+        if isinstance(self.model, BranchingLoraModel):
+            kwargs["task_name"] = task_name
+        
         outputs = self.model(**kwargs)
         return outputs
 
