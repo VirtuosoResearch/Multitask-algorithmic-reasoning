@@ -552,7 +552,7 @@ class BaselineModel(model.Model):
       labels = losses.compute_output_function_labels(truth=truth)
       if labels is None: continue
       if truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL, _Type.POINTER]:
-        mask = (labels == 0)
+        mask = (labels == 1)
       else:
         mask = jnp.ones_like(labels)
       labels_list.append(labels)
@@ -569,7 +569,7 @@ class BaselineModel(model.Model):
       if labels is None: continue
       labels = labels[1:]
       if truth.type_ in [_Type.MASK_ONE, _Type.CATEGORICAL, _Type.POINTER]:
-        mask = (labels == 0)
+        mask = (labels == 1)
       else:
         mask = jnp.ones_like(labels)
       labels_list.append(labels)
