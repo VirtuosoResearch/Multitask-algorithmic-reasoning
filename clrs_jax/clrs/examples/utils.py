@@ -3,6 +3,7 @@ from pynvml import *
 import haiku as hk
 import numpy as np
 import pickle
+import os
 
 
 def print_gpu_utilization():

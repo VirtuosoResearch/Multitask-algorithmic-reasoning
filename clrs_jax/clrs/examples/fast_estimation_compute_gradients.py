@@ -594,7 +594,7 @@ def main(unused_argv):
       final_labels = np.concatenate(final_labels, axis=0)
       final_gradients = final_gradients @ matrix_P
       np.save(f"{gradients_dir}/gradients_{step}_algorithm_{algo_idx}.npy", final_gradients)
-      np.save(f"{gradients_dir}/labels_{step}_algorithm_{algo_idx}.npy", labels)
+      np.save(f"{gradients_dir}/labels_{step}_algorithm_{algo_idx}.npy", final_labels)
     step += 1
 
   logging.info('Done!')

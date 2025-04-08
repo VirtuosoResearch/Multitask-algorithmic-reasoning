@@ -138,8 +138,9 @@ flags.DEFINE_integer('gradient_projection_dim', 400, 'Dimension of the gradient 
 flags.DEFINE_integer('change_algo_index', 0, 'Index of the algorithm to change the checkpoint')
 
 flags.DEFINE_integer('runs', 10, "Runs")
-flags.DEFINE_integer('layer', 0, "Runs")
+flags.DEFINE_integer('layer', 0, "freeze until which layer, 0 indicates no freezing")
 flags.DEFINE_float('perturb_ratio', 0.01, 'Learning rate for the gradient projection')
+flags.DEFINE_integer('num_loaded_gradients', 50, 'Number of layers in the branching structure')
 
 
 flags.DEFINE_boolean('use_branching_structure', False,
@@ -557,6 +558,7 @@ def main(unused_argv):
                 gradient_dim += np.prod(train_model.params[key][param].shape)
 
         # collect gradients
+        # TODO: load gradients from multiple tasks & load checkpoint for multiple tasks
         gradients_dir = f"./gradients/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
                       + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
                       + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms])
@@ -569,18 +571,23 @@ def main(unused_argv):
 
         # load gradients & solve logistic regression
         gradients, labels = [], []; count = 0
-        for file in os.listdir(gradients_dir):
+        file_list = list(os.listdir(gradients_dir))
+        file_list.sort() # sort files to make sure we load the same gradients and labels
+        for file in file_list:
           if "gradients" in file:
             gradients.append(np.load(os.path.join(gradients_dir, file)))
             count += 1
-            if count >= 20: # TODO: Need to be tuned (how many samples are used for linear regression)
+            if count >= FLAGS.num_loaded_gradients: 
               break
         count = 0
-        for file in os.listdir(gradients_dir):
+
+        file_list = list(os.listdir(gradients_dir))
+        file_list.sort()
+        for file in file_list:
           if "labels" in file:
             labels.append(np.load(os.path.join(gradients_dir, file)))
             count += 1
-            if count >= 20:
+            if count >= FLAGS.num_loaded_gradients:
               break
         gradients = np.concatenate(gradients, axis=0)
         labels = np.concatenate(labels, axis=0)
