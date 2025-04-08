@@ -26,12 +26,12 @@ def filter_layers(key, layer_threshold, model_type = "mpnn"):
     '''
     return True if the key is located beyond the layer_threshold
     '''
-    if model_type == "mpnn":
+    if model_type == "mpnn" or model_type == "gat" or model_type == "triplet_mpnn":
         key_word = "linear"
     elif model_type == "edge_t":
         key_word = "ET_Layer"
     else:
-        raise ValueError("model_type must be either 'mpnn' or 'edge_t'")
+        raise ValueError("model_type not defined")
     
     if ('processor' in key) and (key_word in key) and "layer_norm" not in key:
         key_word_index = key.index(key_word)
@@ -45,7 +45,7 @@ def filter_layers(key, layer_threshold, model_type = "mpnn"):
         
     return False
 
-def assign_to_model_parameters(model, params=None, layer=0):
+def assign_to_model_parameters(model, params=None, layer=0, model_type = "mpnn"):
     """Restore model from `file_name`."""
     path = os.path.join(model.checkpoint_path, 'best.pkl')
     with open(path, 'rb') as f:
@@ -59,7 +59,8 @@ def assign_to_model_parameters(model, params=None, layer=0):
               if 'processor' in key and "layer_norm" not in key:
                 cur_dim = np.prod(restored_params[key][param].shape)
                 cur_param = params[cur_len:cur_len+cur_dim]
-                if filter_layers(key, layer):
+                if filter_layers(key, layer, model_type=model_type):
+                  print(f"Assigning {key} {param} to model")
                   restored_params[key][param] += np.reshape(cur_param, restored_params[key][param].shape)
                 else: pass; # skip: not assigning the update parameters to the model
                 cur_len += cur_dim

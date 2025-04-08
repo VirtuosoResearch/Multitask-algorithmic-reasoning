@@ -135,12 +135,14 @@ flags.DEFINE_string('load_checkpoint_path', 'test',
                     'Path from which to load the checkpoint.')
 flags.DEFINE_integer('gradient_projection_seed', 0, 'Seed')
 flags.DEFINE_integer('gradient_projection_dim', 400, 'Dimension of the gradient projection')
-flags.DEFINE_integer('change_algo_index', 0, 'Index of the algorithm to change the checkpoint')
+flags.DEFINE_float('regularization_lambda', 1e3, 'Regularization lambda for the logistic regression')
 
-flags.DEFINE_integer('runs', 10, "Runs")
-flags.DEFINE_integer('layer', 0, "Runs")
-flags.DEFINE_integer('num_subsets', 1, "Runs")
-flags.DEFINE_integer('num_subset_size', 3, "Runs")
+flags.DEFINE_integer('layer', 0,  "freeze until which layer, 0 indicates no freezing")
+flags.DEFINE_integer('num_loaded_gradients', 50, 'Number of layers in the branching structure')
+flags.DEFINE_integer('num_subsets', 1, "")
+flags.DEFINE_integer('num_subset_size', 3, "")
+
+
 
 flags.DEFINE_boolean('use_branching_structure', False,
                      'Whether to define the branching structure of the model.')
@@ -531,7 +533,7 @@ def main(unused_argv):
     
   def solve_logistic_regression(gradients, labels):
     from sklearn.linear_model import LogisticRegression
-    clf = LogisticRegression(random_state=0).fit(gradients, labels)
+    clf = LogisticRegression(penalty='l2',  solver='lbfgs', C=1/FLAGS.regularization_lambda).fit(gradients, labels)
     logging.info('Logistic regression score: %s', clf.score(gradients, labels))
     return clf.coef_
     
@@ -547,7 +549,8 @@ def main(unused_argv):
     utils.restore_model(train_model, 'best.pkl', change_algo_index=None) # load pretrained model
     logging.info('Pretrained model weights: %s', l2_norm(utils.get_pretrained_model_weights(train_model, FLAGS.layer)))
     
-    update_weight = (update_weight / l2_norm(update_weight)) * (FLAGS.perturb_ratio * l2_norm(utils.get_pretrained_model_weights(train_model, FLAGS.layer)))
+    # No need to rescale, only need to tune the regularization factor
+    # update_weight = (update_weight / l2_norm(update_weight)) * (FLAGS.perturb_ratio * l2_norm(utils.get_pretrained_model_weights(train_model, FLAGS.layer)))
     logging.info('Update weight: %s', l2_norm(update_weight))
     return update_weight
 
@@ -560,18 +563,22 @@ def main(unused_argv):
 
     # load gradients & solve logistic regression
     gradients, labels = [], []; count = 0
-    for file in os.listdir(gradients_dir):
+    file_list = list(os.listdir(gradients_dir))
+    file_list.sort()
+    for file in file_list:
       if "gradients" in file:
         gradients.append(np.load(os.path.join(gradients_dir, file)))
         count += 1
-        if count >= 20: 
+        if count >= FLAGS.num_loaded_gradients: 
           break
     count = 0
-    for file in os.listdir(gradients_dir):
+    file_list = list(os.listdir(gradients_dir))
+    file_list.sort()
+    for file in file_list:
       if "labels" in file:
         labels.append(np.load(os.path.join(gradients_dir, file)))
         count += 1
-        if count >= 20:
+        if count >= FLAGS.num_loaded_gradients:
           break
     if len(gradients) == 0:
       return None, None
@@ -583,7 +590,7 @@ def main(unused_argv):
   feedback_list = [next(t) for t in train_samplers]
   all_features = [f.features for f in feedback_list]
   train_model.init(all_features, is_graph_fts_avail, FLAGS.seed + 1)
-  utils.assign_to_model_parameters(train_model)# load pretrained model
+  utils.assign_to_model_parameters(train_model)
 
   # Initialize projection matrix
   gradient_dim = 0
@@ -617,11 +624,12 @@ def main(unused_argv):
 
     # first assign the update weight to the model
     utils.assign_to_model_parameters(train_model)
-    utils.assign_to_model_parameters(train_model, update_weight, FLAGS.layer)
+    utils.assign_to_model_parameters(train_model, update_weight, FLAGS.layer, model_type=FLAGS.processor_type)
 
-    # evaluate the model
+    # evaluate the model 
     eval_results = {}
-    for algo_idx in range(len(train_samplers)):
+    for algo in algorithms:
+      algo_idx = FLAGS.algorithms.index(algo)
       # Validation info.
       new_rng_key, rng_key = jax.random.split(rng_key)
       val_stats = collect_and_eval(
@@ -648,7 +656,7 @@ def main(unused_argv):
     # save results at every step 
     with open(f"./results/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
               + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
-              + "subset_{}_subset_size_{}".format(FLAGS.num_subset, FLAGS.num_subset_size) + ".pkl", 'wb') as f:
+              + "subset_{}_subset_size_{}".format(FLAGS.num_subsets, FLAGS.num_subset_size) + ".pkl", 'wb') as f:
       pickle.dump(all_subset_results, f)
   
   logging.info('Done!')

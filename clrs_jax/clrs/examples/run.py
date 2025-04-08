@@ -606,8 +606,8 @@ def main(unused_argv):
                     FLAGS.algorithms[algo_idx], step,
                     cur_loss, current_train_items[algo_idx])
         
-        if step == 1:
-          utils.print_gpu_utilization()
+        # if step == 1:
+        #   utils.print_gpu_utilization()
 
       # Periodically evaluate model
       if step >= next_eval:
@@ -711,6 +711,11 @@ def main(unused_argv):
 
   for key in metrics:
     logging.info('{}: {:.4f} +- {:.4f}'.format(key, np.mean(metrics[key]), np.std(metrics[key])))
+  
+  save_path = "./results/" + "_".join([algorithm[:3] for algorithm in FLAGS.algorithms]) + ".txt"
+  with open(save_path, 'w') as f:
+    for key in metrics:
+      f.write('{}: {:.4f} +- {:.4f}\n'.format(key, np.mean(metrics[key]), np.std(metrics[key])))
 
 if __name__ == '__main__':
   app.run(main)
