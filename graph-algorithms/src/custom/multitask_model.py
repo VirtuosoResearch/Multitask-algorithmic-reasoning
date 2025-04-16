@@ -72,7 +72,7 @@ class MultitaskModel(pl.LightningModule):
         self.param_names = [name for name, param in model.named_parameters() if param.requires_grad]
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
-        self.evaluate_cot = evaluate_cot # deprecated
+        self.evaluate_cot = evaluate_cot # For GraphWiz
 
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\
@@ -395,14 +395,14 @@ class MultitaskModel(pl.LightningModule):
                 if self.evaluate_cot:
                     # remove the steps and only keeps the answers
                     for i, answer in enumerate(pred_answers):
-                        if "Answer:" in answer:
-                            answer = answer[answer.index("Answer:")+7:]
+                        if "###" in answer:
+                            answer = answer[answer.index("###")+3:]
                             pred_answers[i] = answer
                         else:
                             pred_answers[i] = answer
                     for i, answer in enumerate(gold_answers):
-                        if "Answer:" in answer:
-                            answer = answer[answer.index("Answer:")+7:]
+                        if "###" in answer:
+                            answer = answer[answer.index("###")+3:]
                             gold_answers[i] = answer
                         else:
                             gold_answers[i] = answer
