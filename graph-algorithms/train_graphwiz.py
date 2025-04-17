@@ -112,24 +112,7 @@ def initialize_model(args):
         all_params_count = sum(p.numel() for p in model.parameters())
 
         print(f"Trainable parameters: {trainable_params_count} || All parameters: {all_params_count} || ratio: {trainable_params_count/all_params_count}")
-        print("-"*20,"Bottleneck_Adapter","-"*20)
-    
-    elif args.use_3bit or args.use_2bit:
-        ''' deprecated '''
-        from src.lqlora_utils import lora_utils
-        model = lora_utils.prepare_model_for_lora(
-            model=model,
-            num_ranks=args.lora_rank,
-            lora_alpha=args.lora_alpha,
-            lora_dropout=0.1,
-            use_gradient_checkpointing=True)
-
-        lora_utils.transform_lora_layers(
-            lpq=False,
-            model=model,
-            model_name="nf3" if args.use_3bit else "nf2",
-            device=f"cuda:{args.devices[0]}")
-        model.to(f"cuda:{args.devices[0]}")        
+        print("-"*20,"Bottleneck_Adapter","-"*20)     
 
     elif args.train_lora:
         if args.model_key == "gpt2": # for gpt2, we generally use full model

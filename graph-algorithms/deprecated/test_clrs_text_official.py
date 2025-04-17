@@ -106,17 +106,19 @@ data_module.setup(stage="fit")
 # checkpoint = torch.load("./external_lightning_logs/meta-llama-Llama-3.2-1B_bfs_test_pretraining_cross_attn_run_0/epoch_epoch=19.pt")
 
 # %%
-max_length = 0; max_output_length = 0
+max_length = 0; max_output_length = 0; count = 0
 for test_sample in data_module.task_to_train_datasets[task_name]:
     print(test_sample['input'], test_sample['output'])
+    initial_trace_idx = test_sample["input"].index("initial_trace: ")
+    print(print(test_sample["input"][initial_trace_idx:]))
     length = tokenizer(test_sample['input'], return_tensors='pt')['input_ids'].shape
-    print(length)
     output_length = tokenizer(test_sample['output'], return_tensors='pt')['input_ids'].shape
-    print(output_length)
     max_length = max(max_length, length[1])
     max_output_length = max(max_output_length, output_length[1])
     print("=========")
-    break
+    count += 1
+    if count >= 10:
+        break
 print("Max length: ", max_length)
 print("Max output length: ", max_output_length)
 
