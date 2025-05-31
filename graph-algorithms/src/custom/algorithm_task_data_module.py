@@ -196,7 +196,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             text_encoder = self.text_encoders[i]
 
             # Split the dataset into train and validation
-            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_train.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_train.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             train_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
@@ -204,7 +204,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
 
-            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_valid.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = eval_dataset.column_names
@@ -212,13 +212,14 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
             
-            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
-            predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
-            # fileter out the examples by the text encoder
-            column_names = predict_dataset.column_names
-            predict_dataset = predict_dataset.filter(lambda x: x["text_encoding"] == text_encoder)
-            # convert the input and output format
-            predict_dataset = predict_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            # task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            # predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
+            # # fileter out the examples by the text encoder
+            # column_names = predict_dataset.column_names
+            # predict_dataset = predict_dataset.filter(lambda x: x["text_encoding"] == text_encoder)
+            # # convert the input and output format
+            # predict_dataset = predict_dataset.map(convert_format(), batched=True, remove_columns=column_names)
+            predict_dataset = eval_dataset # use the validation dataset as the test dataset for now
 
             ''' Old Split '''
             # rng = np.random.default_rng(42)

@@ -34,6 +34,8 @@ from torch._inductor.async_compile import AsyncCompile
 logging.basicConfig(filename='log.log', level=logging.INFO, force=True, filemode='a')
 torch.set_float32_matmul_precision("high")
 
+
+
 # peft.__version__ '0.12.0'    
 
 # TODO: 
@@ -57,7 +59,7 @@ def initialize_model(args):
     if "gpt" in args.model_key or "Llama" in model_key \
         or "bloomz" in model_key or "gemma" in model_key or "Mistral" in model_key:
         hf_key = args.model_key.replace("_", "-")
-        tokenizer = AutoTokenizer.from_pretrained(hf_key)
+        tokenizer = AutoTokenizer.from_pretrained(hf_key, cache_dir='/data/shared/models/')
         tokenizer.padding_side = 'right'
         if args.use_qlora:
             quantization_config = BitsAndBytesConfig(
@@ -66,11 +68,11 @@ def initialize_model(args):
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type='nf4'
                 )
-            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) #
+            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}, cache_dir='/data/shared/models/') #
         elif args.use_graph_llama:
-            model = GraphLlamaForCausalLM_GraphQA.from_pretrained(hf_key)
+            model = GraphLlamaForCausalLM_GraphQA.from_pretrained(hf_key, cache_dir='/data/shared/models/')
         else:
-            model = AutoModelForCausalLM.from_pretrained(hf_key)
+            model = AutoModelForCausalLM.from_pretrained(hf_key, cache_dir='/data/shared/models/')
         model_type = "decoder"
         append_eos = True
     elif "flan" in model_key:
@@ -79,6 +81,12 @@ def initialize_model(args):
         tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=512)
         model_type = "encoder_decoder"
         append_eos = False  # t5 tokenizers already append eos
+    elif "Qwen" in model_key:
+        hf_key = args.model_key.replace("_", "-")
+        model = AutoModelForCausalLM.from_pretrained(hf_key)
+        tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=512)
+        model_type = "decoder"
+        append_eos = True
     else:
         raise NotImplementedError(args.model_key)
     if args.use_graph_llama:

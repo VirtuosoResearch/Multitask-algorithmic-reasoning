@@ -166,6 +166,21 @@ class MultitaskModel_GraphQA(pl.LightningModule):
             gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
             output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
 
+            is_label_mask = batch["labels"][:, 1:].contiguous() != -100
+            logits = forward_output["logits"][:, :-1].contiguous()
+            preds = logits[is_label_mask]
+            # probs = torch.softmax(preds, dim=-1)
+            # print("probs: ", probs[:, answer_choices])
+            # copy_preds = preds.clone()
+            # print("preds: ", preds)
+            preds = torch.argmax(preds, dim=-1).detach().cpu().numpy()
+            #print("preds: ", preds)
+            #tokenized pred
+
+            labels = batch["labels"][:, 1:][is_label_mask]
+            # print("labels: ", labels)
+            labels = labels.cpu().numpy()
+
             generate_output = self.generate_output
             if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
                 generate_output = False
@@ -233,9 +248,11 @@ class MultitaskModel_GraphQA(pl.LightningModule):
 
         output_dict = {
             "task_name": task_name,
-            "loss": forward_output['loss'],
-            "answers": gold_answers,
-            "generates": output,
+            "loss": forward_output['loss'].detach(),
+            "labels": batch["labels"],
+            "output": output,
+            "pred_ids": preds,
+            "label_ids": labels,
         }
         if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
             output_dict.update({"graph_accuracy": forward_output.graph_accuracy})
@@ -315,6 +332,14 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
         output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
         
+        preds = logits[is_label_mask]
+        preds = torch.argmax(preds, dim=-1).cpu().numpy()
+
+        valid_labels = labels[is_label_mask]
+        valid_labels = valid_labels.cpu().numpy()
+
+        probs = torch.softmax(logits[is_label_mask], dim=-1)
+        correct_class_probs = probs[range(len(labels[is_label_mask])), labels[is_label_mask]]
         generate_output = self.generate_output
         if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
                 generate_output = False
@@ -379,9 +404,13 @@ class MultitaskModel_GraphQA(pl.LightningModule):
 
         output_dict = {
             "task_name": task_name,
-            "loss": forward_output['loss'],
-            "answers": gold_answers,
-            "generates": output,
+            "loss": forward_output['loss'].detach(),
+            "labels": batch["labels"],
+            "probs": correct_class_probs, # only return the logits of the correct class (save space)
+            "output": output,
+            "pred_ids": preds,
+            "label_ids": valid_labels,
+            "masks": is_label_mask.sum(dim = 1)>0
         }
         if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
             output_dict.update({"graph_accuracy": forward_output.graph_accuracy})

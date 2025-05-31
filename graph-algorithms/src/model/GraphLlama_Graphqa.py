@@ -25,7 +25,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, \
                          CLIPVisionModel, CLIPImageProcessor
 
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from src.model.gnn_models import GNN_Encoder, GINEncoder, MultiTaskHeads, MultiTaskGIN
+from src.model.gnn_models import GNN_Encoder
 
 from torch_geometric.data import Data
 import json
@@ -234,7 +234,7 @@ class GraphLlamaModel(LlamaModel):
             "node_count", "edge_count", "edge_existence", "node_degree",
             "connectivity", "cycle_check", "shortest_path", "triangle_count"
         ]
-        graph_tower = MultiTaskGIN(num_features=32, hidden_dim=32, num_layers=2, task_names=TASK_LIST)
+        graph_tower = GNN_Encoder(num_features=32, hidden_dim=32, num_layers=2, task_names=TASK_LIST)
         graph_tower.load_state_dict(torch.load("MultiGIN.pth"))
         graph_tower.requires_grad_(True)
         if fsdp is not None and len(fsdp) > 0:
