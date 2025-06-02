@@ -235,10 +235,11 @@ def seq2graph(seq, feature_dim=32):
     edge_index, edge_weight = add_self_loops(
         edge_index, fill_value=1.0, num_nodes=num_nodes
     )
-    #print(edge_index)
+
     # --- Create the PyG Data object ---
     x = torch.ones(num_nodes, feature_dim)  # constant feature for each node
-    # Graph-level labels:
+    
+    # Task specific graph-level labels:
     graph_node_count = torch.tensor([num_nodes], dtype=torch.long)
     graph_edge_count = torch.tensor([G.number_of_edges()], dtype=torch.long)
     
@@ -306,7 +307,6 @@ def seq2graph(seq, feature_dim=32):
     data.shortest_path = shortest_path_tensor
 
     data.pos = torch.arange(0, 1, 1/num_nodes, dtype=torch.float)
-    #print(data)
     return data
 
 @dataclass
@@ -376,78 +376,11 @@ class CasualLMInstructionCollator:
         converted_batch = []
         batch_graphs = []; graph_sizes = []
         for instance in batch:
-            #print(instance['input'])
             if 'The edges in G are' in instance['input']:
                 converted_batch.append(instance)
                 batch_graphs.append(seq2graph(instance["input"]))
                 graph_sizes.append(len(batch_graphs[-1].pos))
-            #graph_sizes.append(len(batch_graphs[-1].pos))
-            #print(batch_graphs[-1])
-            #break
-        #print(batch_graphs)
-        #print(converted_batch)
-        #print(batch_graphs)
-        """
-        # prepare input sources
-        sources = []; source_lengths = []
-        for instance in converted_batch:
-            source = instance["input"]
-            source = source.replace("\n", " ")
-            source = " ".join(source.split())
-            tokenized_source = self.tokenizer(source)["input_ids"]
-            if len(tokenized_source) <= self.max_source_length:
-                sources.append(source)
-            else:
-                sources.append(self.tokenizer.decode(tokenized_source[:self.max_source_length], skip_special_tokens=True))
-            source_lengths.append(min(len(tokenized_source), self.max_source_length))
-
-        labels = []; label_lengths = []
-        for instance in converted_batch:
-            label = instance["output"]
-            label = label.replace("\n", " ")
-            label = " ".join(label.split())
-            tokenized_label = self.tokenizer(label)["input_ids"]
-            if len(tokenized_label) <= self.max_target_length:
-                labels.append(label)
-            else:
-                labels.append(self.tokenizer.decode(tokenized_label[:self.max_target_length], skip_special_tokens=True))
-            label_lengths.append(min(len(tokenized_label), self.max_target_length))
-
-        inputs = [source + " " + label for source, label in zip(sources, labels)]
-        print(inputs)
-        model_inputs = self.tokenizer(
-                text = inputs, 
-                max_length=self.max_source_length, 
-                padding=self.padding,
-                return_tensors=self.return_tensors, 
-                truncation=True)
-        original_input_ids = self.tokenizer(
-                text = inputs, 
-                padding="longest",
-                return_tensors=self.return_tensors, 
-                truncation=True)["input_ids"]
-        model_inputs["original_input_ids"] = original_input_ids
-        # prepare labels
-        model_inputs["labels"] = model_inputs["input_ids"].clone()
-        label_mask = model_inputs["attention_mask"].clone().bool()
-        model_inputs["labels"] = model_inputs["labels"].masked_fill(~label_mask, self.label_pad_token_id)
-        for i, length in enumerate(source_lengths):
-            model_inputs["labels"][i, :length] = self.label_pad_token_id            
-
-        batch_graphs = Batch.from_data_list(batch_graphs)
-        #print(batch_graphs)
-        #batch_graphs.inputs = batch_graphs.inputs[0]
-        model_inputs["graph_data"] = batch_graphs   
-
-        if "weights" in converted_batch[0]:
-            model_inputs["weights"] = torch.Tensor([instance["weights"] for instance in converted_batch])
-
-        if "residuals" in converted_batch[0]:
-            model_inputs["residuals"] = torch.Tensor([instance["residuals"] for instance in converted_batch])
-        #print("=======>", model_inputs)
-
-        return model_inputs
-        """
+        
         # prepare input sources
         original_sources = []
         for idx, instance in enumerate(converted_batch):
@@ -592,7 +525,6 @@ class AlgorithmGraphDataModule(pl.LightningDataModule):
             train_dataset = train_dataset.filter(lambda x: x["text_encoding"] == text_encoder)
             # convert the input and output format
             train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
-            print(train_dataset.features)
 
             task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_valid.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
             eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
