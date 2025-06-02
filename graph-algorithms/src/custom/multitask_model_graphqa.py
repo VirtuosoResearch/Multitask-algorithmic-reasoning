@@ -25,7 +25,8 @@ class MultitaskModel_GraphQA(pl.LightningModule):
     validation_predictions: Dict
 
     def __init__(self, model, tokenizer: PreTrainedTokenizerBase, model_type: str, use_cpu_offload=False,
-                lr=3e-4, truncate_early=True, max_length=1024, max_output_length = 64, weight_decay=1e-4, use_wandb=False,
+                lr=3e-4, truncate_early=True, max_length=1024, max_output_length = 64, weight_decay=1e-4, 
+                use_wandb=False, wandb_name=None,
                 optimizer="adamw", generate_output=True, task_names=[],
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
@@ -73,6 +74,18 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
         self.evaluate_cot = evaluate_cot # deprecated
+
+        if self.use_wandb:
+            wandb_output_dir = os.path.join("wandb", "outputs")
+            if not os.path.exists(wandb_output_dir):
+                os.makedirs(wandb_output_dir)
+            wandb.init(
+                dir=wandb_output_dir,
+                project="GraphQA",
+                entity="zszhang-northeastern-university",
+                name=wandb_name,
+                resume=False,
+            )
 
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\
@@ -495,6 +508,9 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         summary.update({"edit_distance": np.mean([summary[f"{task_name}_edit_distance"] for task_name in self.task_names])})
 
         # Log metrics
+        if self.use_wandb:
+            wandb.log({f"val_{key}": value for key, value in summary.items()}, step=self.current_epoch)
+
         logging.info(summary)
         if summary:
             for key, value in summary.items():
@@ -502,6 +518,7 @@ class MultitaskModel_GraphQA(pl.LightningModule):
                     self.log(key, value, prog_bar=True, logger=True)
                 else:
                     self.log(key, value, prog_bar=False, logger=True)
+        
         self.validation_step_outputs.clear()
         return summary
 

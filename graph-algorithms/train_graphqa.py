@@ -284,9 +284,15 @@ if __name__ == "__main__":
     print("-" * 80)
 
     model_key = args.model_key.replace("/", "-").replace("..", "")
-    save_name = model_key + \
+    save_name = model_key + "_" + \
+                ("_".join(args.task_names) if len("_".join(args.task_names)) <= 100 else "{}_tasks".format(len(args.task_names))) + \
+                ("_downsample_ratio_{}".format(args.downsample_ratio)) + \
                 (f"_{args.save_name}" if args.save_name else "") + \
-                (f"_lora_r_{args.lora_rank}" if args.train_lora else "")
+                (f"_lr_{args.lr}_wd_{args.weight_decay}") + \
+                (f"_lora_r_{args.lora_rank}" if args.train_lora else "") + \
+                (f"_lora_a_{args.lora_alpha}" if args.train_lora else "") + \
+                (f"_nodes_{args.min_nodes}_{args.max_nodes}")
+    print("save_name:", save_name)
     file_dir = os.path.join("./results/", save_name)
     if not os.path.exists(file_dir):
         os.mkdir(file_dir)
@@ -338,7 +344,7 @@ if __name__ == "__main__":
 
         extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
         lm = MultitaskModel_GraphQA(model, tokenizer, model_type, use_cpu_offload=False,
-                        lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
+                        lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, wandb_name=save_name,
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
         
         load_model_dir = args.load_model_dir
