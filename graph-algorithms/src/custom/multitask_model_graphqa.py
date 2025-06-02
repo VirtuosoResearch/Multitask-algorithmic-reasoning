@@ -249,7 +249,7 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         output_dict = {
             "task_name": task_name,
             "loss": forward_output['loss'].detach(),
-            "labels": batch["labels"],
+            "labels": gold_answers,
             "output": output,
             "pred_ids": preds,
             "label_ids": labels,
@@ -455,12 +455,12 @@ class MultitaskModel_GraphQA(pl.LightningModule):
             task_counts = {task_name: 0 for task_name in self.task_names}
             for step, batch in enumerate(outputs):
                 task_name = batch["task_name"]
-                if len(batch["answers"]) == 0:
+                if len(batch["labels"]) == 0:
                     continue
-                summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["answers"]) if torch.isnan(batch["loss"]) == False else 0
+                summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["labels"]) if torch.isnan(batch["loss"]) == False else 0
 
-                pred_answers = self.tokenizer.batch_decode(batch['generates'], skip_special_tokens=True)
-                gold_answers = self.tokenizer.batch_decode(batch['answers'], skip_special_tokens=True)
+                pred_answers = self.tokenizer.batch_decode(batch['output'], skip_special_tokens=True)
+                gold_answers = self.tokenizer.batch_decode(batch['labels'], skip_special_tokens=True)
                 if step == 0:
                     print("gold_answers", gold_answers[:4])
                     print("pred_answers", pred_answers[:4])
@@ -480,9 +480,9 @@ class MultitaskModel_GraphQA(pl.LightningModule):
                             gold_answers[i] = answer
                 gold_answers = [[answer] for answer in gold_answers]
                 metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
-                summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
-                summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
-                task_counts[task_name] += len(batch["answers"])
+                summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["labels"])
+                summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["labels"])
+                task_counts[task_name] += len(batch["labels"])
             
             for task_name in self.task_names:
                 if task_counts[task_name] > 0:

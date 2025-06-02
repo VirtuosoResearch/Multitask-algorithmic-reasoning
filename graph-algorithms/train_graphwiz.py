@@ -289,7 +289,7 @@ if __name__ == "__main__":
                             default_root_dir=default_root_dir, min_epochs=args.epochs, max_epochs=args.epochs,
                             accumulate_grad_batches=args.accumulate, precision=args.precision,
                             enable_checkpointing=args.enable_checkpointing,
-                            callbacks=[checkpoint_callback]
+                            callbacks=[checkpoint_callback], check_val_every_n_epoch=3
                             )
         # save initial weights
         if args.train_lora:
@@ -337,7 +337,6 @@ if __name__ == "__main__":
                 
                 summary = trainer.validate(lm, dataloaders=data_module.test_dataloader())[0]
                 summary = {f"test_{key}": val for key, val in summary.items()}
-                summary.update(trainer.validate(lm, dataloaders=data_module.val_dataloader())[0])
             else:
                 summary = trainer.validate(lm, datamodule=data_module, ckpt_path=checkpoint_callback.best_model_path)[0]
             logging.info(summary)
