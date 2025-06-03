@@ -376,7 +376,7 @@ if __name__ == "__main__":
             dirpath=default_root_dir,
             filename="epoch_{epoch}",
             save_top_k=1,
-            monitor='val_loss',
+            monitor='train_loss',
             save_last=True,
             mode="min",
         )
