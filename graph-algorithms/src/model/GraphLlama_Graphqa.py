@@ -25,7 +25,7 @@ from transformers import AutoConfig, AutoModelForCausalLM, \
                          CLIPVisionModel, CLIPImageProcessor
 
 from transformers.modeling_outputs import BaseModelOutputWithPast, CausalLMOutputWithPast
-from src.model.gnn_models import GNN_Encoder
+from src.model.gnn_models import GNN_Encoder, MultiTaskGIN
 
 from torch_geometric.data import Data
 import json
@@ -110,7 +110,6 @@ def load_model_pretrained(model_name, pretrain_model_path):
     model = model_name(args)
     pkl_files = glob.glob(osp.join(pretrain_model_path, '*.pkl'))
     state_dict = torch.load(pkl_files[0])
-    # print(state_dict.keys())
     if 'logit_scale' in state_dict.keys(): 
         state_dict.pop('logit_scale')
     print('loading graph pre train model')
@@ -120,8 +119,6 @@ def load_model_pretrained(model_name, pretrain_model_path):
     return model, args
 
 def transfer_param_tograph(clip_graph, gnn):
-    
-    print(clip_graph)
     gnn_state_dict = clip_graph.gnn.state_dict()
     gnn.load_state_dict(gnn_state_dict)
     return gnn
@@ -179,82 +176,24 @@ class GraphLlamaModel(LlamaModel):
     def __init__(self, config: LlamaConfig):
         super(GraphLlamaModel, self).__init__(config)
 
-        # Only add graph tower using the initialize function
-        # if hasattr(config, "graph_tower"):
-        #     # HACK: for FSDP
-        #     # self.vision_tower = [CLIPVisionModel.from_pretrained(config.graph_tower)]
-        #     # self.arxiv_projector = nn.Linear(config.graph_hidden_size, config.hidden_size)
-        #     if config.graph_tower == 'MPNN': 
-        #         self.graph_tower = MPNN(in_channels = config.graph_hidden_size, hidden_channels = config.graph_hidden_size * 2, out_channels = config.graph_hidden_size, dropout = 0.1, num_layers = 2, if_param = False)
-        # if hasattr(config, "use_graph_proj"):
-        #     self.graph_projector = nn.Linear(config.graph_hidden_size, config.hidden_size)
-
     def get_graph_tower(self):
         graph_tower = getattr(self, 'graph_tower', None)
         if type(graph_tower) is list:
             graph_tower = graph_tower[0]
         return graph_tower
-
-    def initialize_graph_modules(self, graph_tower, specs, cfg, use_cross_attn=True, 
-                                 add_output_projection=True, 
-                                 alignment_loss_weight=0.1,
-                                 test_classifier_before_cross_attn=True, # only used for evaluating feature accuracy
-                                 graph_select_layer=-1, pretrain_graph_mlp_adapter=None, fsdp=None):
-        self.config.graph_tower = graph_tower
-
-        if not hasattr(self, 'graph_tower'):
-            graph_tower = GNN_Encoder(specs, cfg)
-        else:
-            graph_tower = self.graph_tower
-        graph_tower.requires_grad_(True)
-
-        if fsdp is not None and len(fsdp) > 0:
-            self.graph_tower = [graph_tower]
-        else:
-            self.graph_tower = graph_tower
-
-        self.config.use_graph_proj = True
-        self.config.graph_select_layer = graph_select_layer
-
-        self.graph_projector = nn.Linear(cfg.MODEL.HIDDEN_DIM, self.config.hidden_size)
-        self.graph_classifier = nn.Linear(self.config.hidden_size, cfg.MODEL.NUM_CLASSES) # only used for evaluating feature accuracy
-        self.alignment_loss_weight = alignment_loss_weight
-        self.test_classifier_before_cross_attn = test_classifier_before_cross_attn
-
-        if use_cross_attn:
-            # This is setting up pseudo token embeddings for cross attention with graph features
-            # self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
-            # for i in range(num_soft_prompts):
-            #     self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
-            self.graph_token_cross_attn = CrossAttention(self.config.hidden_size, num_heads=1, dropout=0.1, add_output_projection=add_output_projection)
-    def init_gin(self, use_cross_attn=True, num_soft_prompts=15, add_output_projection=True, 
-                 test_classifier_before_cross_attn=True, # only used for evaluating feature accuracy
-                graph_select_layer=-1, pretrain_graph_mlp_adapter=None, fsdp=None):
+    
+    def init_gnn(self, hidden_dim=64, num_layers=2, max_num_nodes=20):
         TASK_LIST = [
             "node_count", "edge_count", "edge_existence", "node_degree",
             "connectivity", "cycle_check", "shortest_path", "triangle_count"
         ]
-        graph_tower = GNN_Encoder(num_features=32, hidden_dim=32, num_layers=2, task_names=TASK_LIST)
-        graph_tower.load_state_dict(torch.load("MultiGIN.pth"))
-        graph_tower.requires_grad_(True)
-        if fsdp is not None and len(fsdp) > 0:
-            self.graph_tower = [graph_tower]
-        else:
-            self.graph_tower = graph_tower
-
-        self.config.use_graph_proj = True
-        self.config.graph_select_layer = graph_select_layer
-
-        self.graph_projector = nn.Linear(32, self.config.hidden_size)
-        self.graph_classifier = nn.Linear(self.config.hidden_size, 40) # only used for evaluating feature accuracy
-        self.test_classifier_before_cross_attn = test_classifier_before_cross_attn
-
-        if use_cross_attn:
-            self.graph_token_embeddings = nn.Embedding(num_soft_prompts, self.config.hidden_size)
-            for i in range(num_soft_prompts):
-                self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
-
-            self.graph_token_cross_attn = CrossAttention(self.config.hidden_size, num_heads=1, dropout=0.1, add_output_projection=add_output_projection)
+        graph_tower = MultiTaskGIN(num_features=self.config.hidden_size, hidden_dim=hidden_dim, num_layers=num_layers, task_names=TASK_LIST)
+        self.graph_tower = graph_tower
+        self.graph_projector = nn.Linear(hidden_dim, self.config.hidden_size)
+        self.graph_token_embeddings = nn.Embedding(max_num_nodes, self.config.hidden_size)
+        for i in range(max_num_nodes):
+            self.graph_token_embeddings.weight.data[i] = self.embed_tokens.weight.data[num_to_token[i]].clone()
+    
     def forward(
         self, *,
         task_name: str,
@@ -273,12 +212,6 @@ class GraphLlamaModel(LlamaModel):
         only_compute_graph_loss: Optional[bool] = False,
     ) -> Union[Tuple, BaseModelOutputWithPast]:
 
-        # HACK: replace back original embeddings for LLaVA pretraining
-        # orig_embeds_params = getattr(self, 'orig_embeds_params', None)
-        # if orig_embeds_params is not None:
-        #     orig_embeds_params = orig_embeds_params[0]
-        #     with torch.no_grad():
-        #         self.get_input_embeddings().weight.data[:-2] = orig_embeds_params[:-2].data
         if inputs_embeds is None:
             inputs_embeds = self.embed_tokens(input_ids)
             if original_input_ids is not None:
@@ -289,53 +222,25 @@ class GraphLlamaModel(LlamaModel):
 
             task_name = re.sub(r'_zero_shot$', '', task_name)
             graph_batch_ptr = graph_data.ptr
-            graph_outputs = graph_tower(graph_data, task_name)
+            graph_node_idxes = torch.concat(
+                [torch.arange(graph_batch_ptr[i+1]-graph_batch_ptr[i]) for i in range(len(graph_batch_ptr)-1)], dim=0).to(inputs_embeds.device)
+            graph_data.x = self.graph_token_embeddings(graph_node_idxes)
+
             graph_node_features = graph_tower.encode(graph_data, task_name)         
             graph_node_features = self.graph_projector(graph_node_features)
-            dummy_graph_features = torch.zeros_like(graph_node_features[0]).unsqueeze(0)
-            # compute graph classification loss
-            #if self.test_classifier_before_cross_attn:
-            graph_labels = graph_data.node_count
-            #graph_node_logits = self.graph_classifier(graph_node_features)
-            graph_loss = F.cross_entropy(graph_outputs['node_count'], graph_labels)
-            
+            dummy_graph_features = torch.zeros_like(graph_node_features[0]).unsqueeze(0)            
 
-            graph_accuracy = (graph_outputs['node_count'].detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
-
-            """
-            if hasattr(self, 'graph_token_cross_attn') and hasattr(self, 'graph_token_embeddings'):
-                # attend graph features with token embeddings
-                graph_token_embeds = self.graph_token_embeddings.weight
-                graph_node_features = self.graph_token_cross_attn(graph_node_features.view(1, -1, self.config.hidden_size),
-                                                                    graph_token_embeds.unsqueeze(0).expand(1, -1, -1),
-                                                                    graph_token_embeds.unsqueeze(0).expand(1, -1, -1))
-                graph_node_features = graph_node_features.view(-1, self.config.hidden_size)
-            """
-            """
-            if not self.test_classifier_before_cross_attn:
-                graph_labels = graph_data.node_degree
-                #graph_node_logits = self.graph_classifier(graph_node_features)
-                graph_loss = F.cross_entropy(graph_outputs['degree_pred'], graph_labels)
-                graph_accuracy = (graph_outputs['degree_pred'].detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
-            """
-            
             new_input_embeds = []
             cur_graph_idx = 0
             graph_patch_token = DEFAULT_GRAPH_PATCH_TOKEN
             for cur_input_ids, cur_input_embeds in zip(input_ids, inputs_embeds):
-                #print(cur_input_ids)
-                #print(graph_patch_token)
                 if (cur_input_ids == graph_patch_token).sum() == 0: # no patch token in the sequence
-                    # this is training the bias of the projector
-                    #print("WARNING: no graph patch token in the input sequence")
-                    print(a)
                     cur_input_embeds = cur_input_embeds + (0. * dummy_graph_features).sum()
                     new_input_embeds.append(cur_input_embeds)
                     cur_graph_idx += 1
                 else:
                     cur_graph_features = graph_node_features[graph_batch_ptr[cur_graph_idx]:graph_batch_ptr[cur_graph_idx+1]]
                     num_patches = cur_graph_features.shape[0]
-                    
                     graph_patch_tokens = torch.where(cur_input_ids == graph_patch_token)[0]
                     assert len(graph_patch_tokens) == num_patches # make sure the number of graph patch tokens is the same as the number of patches
                     # insert the graph features after the graph start token
@@ -343,8 +248,6 @@ class GraphLlamaModel(LlamaModel):
                         (cur_input_embeds[:graph_patch_tokens[0]], 
                             cur_graph_features, 
                             cur_input_embeds[graph_patch_tokens[-1] + 1:]), dim=0)
-                    # if cur_graph_idx == 0:
-                    #     print(cur_new_input_embeds[:32].abs().sum(dim=1))
                     cur_graph_idx += 1
                     new_input_embeds.append(cur_new_input_embeds)
                 
@@ -352,6 +255,11 @@ class GraphLlamaModel(LlamaModel):
             inputs_embeds = torch.stack(new_input_embeds, dim=0)
 
         if only_compute_graph_loss:
+            # compute graph classification loss
+            graph_outputs = graph_tower(graph_data, task_name)
+            graph_labels = graph_data.node_count
+            graph_loss = F.cross_entropy(graph_outputs['node_count'], graph_labels)            
+            graph_accuracy = (graph_outputs['node_count'].detach().argmax(dim=1) == graph_labels).float().mean().cpu().item()
             outputs = CausalLMOutputWithPast(loss=graph_loss)
             outputs.graph_loss = graph_loss
             outputs.graph_accuracy = graph_accuracy
@@ -362,7 +270,6 @@ class GraphLlamaModel(LlamaModel):
                 output_attentions=output_attentions, output_hidden_states=output_hidden_states, 
                 return_dict=return_dict
             )
-            #outputs.alignment_loss = graph_feature_distance*self.alignment_loss_weight
         return outputs
 
 
@@ -430,13 +337,10 @@ class GraphLlamaForCausalLM_GraphQA(LlamaForCausalLM):
             return_dict=return_dict,
             graph_data = graph_data,
             original_input_ids = original_input_ids,
-            only_compute_graph_loss=self.only_train_graph,
+            only_compute_graph_loss=False,
             position_ids=position_ids,
             cache_position=cache_position,
         )
-
-        if self.only_train_graph:
-            return outputs
 
         hidden_states = outputs[0]
         logits = self.lm_head(hidden_states)

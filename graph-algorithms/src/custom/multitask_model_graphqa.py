@@ -161,7 +161,6 @@ class MultitaskModel_GraphQA(pl.LightningModule):
             raise NotImplementedError("model_type='{}' not supported".format(self.model_type)) # TODO
         elif self.model_type == "decoder":            
             ''' Generate the labels '''
-
             gold_answers = batch["labels"].clone()
             gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
             output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
@@ -169,16 +168,9 @@ class MultitaskModel_GraphQA(pl.LightningModule):
             is_label_mask = batch["labels"][:, 1:].contiguous() != -100
             logits = forward_output["logits"][:, :-1].contiguous()
             preds = logits[is_label_mask]
-            # probs = torch.softmax(preds, dim=-1)
-            # print("probs: ", probs[:, answer_choices])
-            # copy_preds = preds.clone()
-            # print("preds: ", preds)
             preds = torch.argmax(preds, dim=-1).detach().cpu().numpy()
-            #print("preds: ", preds)
-            #tokenized pred
 
             labels = batch["labels"][:, 1:][is_label_mask]
-            # print("labels: ", labels)
             labels = labels.cpu().numpy()
 
             generate_output = self.generate_output
@@ -495,7 +487,7 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         summary.update({"edit_distance": np.mean([summary[f"{task_name}_edit_distance"] for task_name in self.task_names])})
 
         # Log metrics
-        logging.info(summary)
+        print(summary)
         if summary:
             for key, value in summary.items():
                 if "accuracy" in key:
