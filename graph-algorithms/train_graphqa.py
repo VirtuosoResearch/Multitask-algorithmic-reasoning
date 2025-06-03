@@ -7,6 +7,7 @@ from src.custom.algorithm_task_data_module import AlgorithmDataModule
 from src.custom.algorithm_task_graph_data_module import AlgorithmGraphDataModule
 from src.model.GraphLlama_Graphqa import GraphLlamaForCausalLM_GraphQA
 from src.custom.multitask_model_graphqa import MultitaskModel_GraphQA
+from src.custom.multitask_model import MultitaskModel
 
 from functools import partial
 from pytorch_lightning.trainer.states import RunningStage, TrainerFn
@@ -40,6 +41,8 @@ torch.set_float32_matmul_precision("high")
 
 # TODO: 
 #   1. change cycle check output to just yes or no
+#   1. change to classification tasks
+#   2. tune gnn encoders
 
 def add_result_to_csv(result_datapoint, file_name):
     for key, val in result_datapoint.items():
@@ -59,7 +62,7 @@ def initialize_model(args):
     if "gpt" in args.model_key or "Llama" in model_key \
         or "bloomz" in model_key or "gemma" in model_key or "Mistral" in model_key:
         hf_key = args.model_key.replace("_", "-")
-        tokenizer = AutoTokenizer.from_pretrained(hf_key, cache_dir='/data/shared/models/')
+        tokenizer = AutoTokenizer.from_pretrained(hf_key)
         tokenizer.padding_side = 'right'
         if args.use_qlora:
             quantization_config = BitsAndBytesConfig(
@@ -68,11 +71,11 @@ def initialize_model(args):
                 bnb_4bit_use_double_quant=True,
                 bnb_4bit_quant_type='nf4'
                 )
-            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}, cache_dir='/data/shared/models/') #
+            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) #
         elif args.use_graph_llama:
-            model = GraphLlamaForCausalLM_GraphQA.from_pretrained(hf_key, cache_dir='/data/shared/models/')
+            model = GraphLlamaForCausalLM_GraphQA.from_pretrained(hf_key)
         else:
-            model = AutoModelForCausalLM.from_pretrained(hf_key, cache_dir='/data/shared/models/')
+            model = AutoModelForCausalLM.from_pretrained(hf_key)
         model_type = "decoder"
         append_eos = True
     elif "flan" in model_key:
@@ -89,34 +92,31 @@ def initialize_model(args):
         append_eos = True
     else:
         raise NotImplementedError(args.model_key)
+    
     if args.use_graph_llama:
-        """
-        cfg = load_cfg("./src/model/gnn_models/configs/SAGE.yml")
-        specs = np.load(f".//src/model/specs/{args.task_names[0]}_specs.npy", allow_pickle=True).item()
-
-        model.get_model().initialize_graph_modules(
-            graph_tower="SAGE",
-            specs=specs, cfg=cfg, use_cross_attn=args.use_cross_attn, 
-            num_soft_prompts=args.num_soft_prompts, add_output_projection=args.add_output_projection,
-            test_classifier_before_cross_attn=args.test_classifier_before_cross_attn
-        )
-        """
-        model.get_model().init_gin()
+        model.get_model().init_gnn()
         
-        model.requires_grad_(False)
-        # only the graph tower is trainable
-        if not args.freeze_graph_tower:
-            for p in model.get_model().get_graph_tower().parameters():
-                p.requires_grad = True
+        model.requires_grad_(True)
+        for p in model.get_model().get_graph_tower().parameters():
+            p.requires_grad = True
         for p in model.get_model().graph_projector.parameters():
             p.requires_grad = True
-        if args.use_cross_attn:
-            if not args.freeze_embeddings:
-                for p in model.get_model().graph_token_embeddings.parameters():
-                    p.requires_grad = True
-            for p in model.get_model().graph_token_cross_attn.parameters():
-                p.requires_grad = True
-        model.set_if_only_train_graph(args.only_train_graph)
+        for p in model.get_model().graph_token_embeddings.parameters():
+            p.requires_grad = True
+        
+        # # only the graph tower is trainable
+        # if not args.freeze_graph_tower:
+        #     for p in model.get_model().get_graph_tower().parameters():
+        #         p.requires_grad = True
+        # for p in model.get_model().graph_projector.parameters():
+        #     p.requires_grad = True
+        # if args.use_cross_attn:
+        #     if not args.freeze_embeddings:
+        #         for p in model.get_model().graph_token_embeddings.parameters():
+        #             p.requires_grad = True
+        #     for p in model.get_model().graph_token_cross_attn.parameters():
+        #         p.requires_grad = True
+        # model.set_if_only_train_graph(args.only_train_graph)
         
     if args.train_adapter:
         
@@ -217,7 +217,6 @@ def initialize_model(args):
 
     return model, tokenizer, hf_key, model_type, append_eos
 
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
@@ -253,13 +252,13 @@ if __name__ == "__main__":
     parser.add_argument("--use_qadapter", action="store_true")
 
     parser.add_argument("--use_graph_llama", action="store_true")
-    parser.add_argument("--only_train_graph", action="store_true") # pretraining gnn 
-    parser.add_argument("--test_classifier_before_cross_attn", action="store_true") # pretraining gnn
-    parser.add_argument("--freeze_graph_tower", action="store_true")
-    parser.add_argument("--freeze_embeddings", action="store_true")
-    parser.add_argument("--use_cross_attn", action="store_true")
-    parser.add_argument("--add_output_projection", action="store_true")
-    parser.add_argument('--num_soft_prompts', type=int, default=15)
+    # parser.add_argument("--only_train_graph", action="store_true") # pretraining gnn 
+    # parser.add_argument("--test_classifier_before_cross_attn", action="store_true") # pretraining gnn
+    # parser.add_argument("--freeze_graph_tower", action="store_true")
+    # parser.add_argument("--freeze_embeddings", action="store_true")
+    # parser.add_argument("--use_cross_attn", action="store_true")
+    # parser.add_argument("--add_output_projection", action="store_true")
+    # parser.add_argument('--num_soft_prompts', type=int, default=15)
 
     parser.add_argument("--use_qlora", action="store_true")
     parser.add_argument("--use_3bit", action="store_true")
@@ -337,7 +336,8 @@ if __name__ == "__main__":
         data_module.setup(stage="fit")
 
         extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
-        lm = MultitaskModel_GraphQA(model, tokenizer, model_type, use_cpu_offload=False,
+        model_cls = MultitaskModel_GraphQA if args.use_graph_llama else MultitaskModel
+        lm = model_cls(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
         
@@ -345,7 +345,7 @@ if __name__ == "__main__":
         load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
         if load_model_dir is not None:
             if ("ckpt" in load_model_dir) and os.path.exists(load_model_dir):
-                lm = MultitaskModel_GraphQA.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
+                lm = model_cls.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 print(f"Loaded model from {load_model_dir}")
@@ -423,7 +423,7 @@ if __name__ == "__main__":
             if args.use_qadapter or args.use_qlora or args.use_3bit or args.use_2bit:                         
                 model, tokenizer, hf_key, model_type, append_eos = initialize_model(args)
                 model.load_state_dict(state_dict, strict=False)
-                lm = MultitaskModel_GraphQA(model, tokenizer, model_type, use_cpu_offload=False,
+                lm = model_cls(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
                         optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
                 if args.use_3bit or args.use_2bit:
