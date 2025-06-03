@@ -283,9 +283,15 @@ if __name__ == "__main__":
     print("-" * 80)
 
     model_key = args.model_key.replace("/", "-").replace("..", "")
-    save_name = model_key + \
+    save_name = model_key + "_" + \
+                ("_".join(args.task_names) if len("_".join(args.task_names)) <= 100 else "{}_tasks".format(len(args.task_names))) + \
+                ("_downsample_ratio_{}".format(args.downsample_ratio)) + \
                 (f"_{args.save_name}" if args.save_name else "") + \
-                (f"_lora_r_{args.lora_rank}" if args.train_lora else "")
+                (f"_lr_{args.lr}_wd_{args.weight_decay}") + \
+                (f"_lora_r_{args.lora_rank}" if args.train_lora else "") + \
+                (f"_lora_a_{args.lora_alpha}" if args.train_lora else "") + \
+                (f"_nodes_{args.min_nodes}_{args.max_nodes}")
+    print("save_name:", save_name)
     file_dir = os.path.join("./results/", save_name)
     if not os.path.exists(file_dir):
         os.mkdir(file_dir)
@@ -367,11 +373,12 @@ if __name__ == "__main__":
         #     os.system(f"rm -rf {default_root_dir}")
         
         checkpoint_callback = ModelCheckpoint(
-            monitor="accuracy",
             dirpath=default_root_dir,
             filename="epoch_{epoch}",
-            save_top_k=(-1 if args.save_every_epoch else 1),
-            mode="max",
+            save_top_k=1,
+            monitor='train_loss',
+            save_last=True,
+            mode="min",
         )
 
         trainer = pl.Trainer(accelerator="gpu", devices=args.devices, strategy=args.strategy,

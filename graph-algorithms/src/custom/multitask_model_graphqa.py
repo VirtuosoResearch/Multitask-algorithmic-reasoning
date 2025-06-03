@@ -25,7 +25,8 @@ class MultitaskModel_GraphQA(pl.LightningModule):
     validation_predictions: Dict
 
     def __init__(self, model, tokenizer: PreTrainedTokenizerBase, model_type: str, use_cpu_offload=False,
-                lr=3e-4, truncate_early=True, max_length=1024, max_output_length = 64, weight_decay=1e-4, use_wandb=False,
+                lr=3e-4, truncate_early=True, max_length=1024, max_output_length = 64, weight_decay=1e-4, 
+                use_wandb=False, wandb_name=None,
                 optimizer="adamw", generate_output=True, task_names=[],
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
@@ -73,6 +74,19 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
         self.evaluate_cot = evaluate_cot # deprecated
+
+        self.train_losses = []
+        if self.use_wandb:
+            wandb_output_dir = os.path.join("wandb", "outputs")
+            if not os.path.exists(wandb_output_dir):
+                os.makedirs(wandb_output_dir)
+            wandb.init(
+                dir=wandb_output_dir,
+                project="GraphQA",
+                entity="zszhang-northeastern-university",
+                name=wandb_name,
+                resume=False,
+            )
 
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\
@@ -131,10 +145,18 @@ class MultitaskModel_GraphQA(pl.LightningModule):
             return loss
         else:
             loss = self.model(**kwargs)["loss"]
-            if self.use_wandb:
-                wandb.log({"train_loss": loss})
+            self.train_losses.append(loss.detach().item())
             self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
             return loss
+
+    def on_train_epoch_end(self) -> None:
+        """
+        Log the average training loss for the epoch.
+        """
+        if self.use_wandb:
+            wandb.log({"loss": np.mean(self.train_losses)}, step=self.current_epoch)
+        logging.info(f"Epoch {self.current_epoch} - Average training loss: {np.mean(self.train_losses)}")
+        self.train_losses.clear()
 
     def validation_step(self, batch, batch_idx) -> Dict[str, torch.Tensor]:
         """
@@ -428,6 +450,31 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         losses = losses[torch.isnan(losses) == False]
         summary.update({"loss": losses.mean().item()})
 
+        task_counts = {task_name: 0 for task_name in self.task_names}
+        for batch in outputs:
+            # if self.generate_output:
+            #     labels = batch["label"]; labels[labels == -100] = self.tokenizer.pad_token_id
+            #     output = batch["output"]; output[output == -100] = self.tokenizer.pad_token_id
+            
+            #     label_str = self.tokenizer.batch_decode(labels, skip_special_tokens=True)
+            #     output_str = self.tokenizer.batch_decode(output, skip_special_tokens=True)
+            #     metrics = compute_metrics(output_str, label_str)
+                
+            #     for key, value in metrics.items():
+            #         if key not in summary:
+            #             summary[key] = 0
+            #         summary[key] += value*len(batch["label_ids"])
+            task_name = batch["task_name"]
+            if len(batch["label_ids"]) == 0:
+                continue
+            summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["label_ids"]) if torch.isnan(batch["loss"]) == False else 0
+            summary[f"{task_name}_accuracy"] += accuracy_score(batch["label_ids"], batch["pred_ids"])*len(batch["label_ids"])*100
+            task_counts[task_name] += len(batch["label_ids"])
+        for task_name in self.task_names:
+            summary[f"{task_name}_loss"] /= task_counts[task_name]
+            summary[f"{task_name}_accuracy"] /= task_counts[task_name]
+            summary[f"{task_name}_edit_distance"] /= task_counts[task_name]
+
         generate_output = self.generate_output
         if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
             generate_output = False
@@ -487,13 +534,14 @@ class MultitaskModel_GraphQA(pl.LightningModule):
         summary.update({"edit_distance": np.mean([summary[f"{task_name}_edit_distance"] for task_name in self.task_names])})
 
         # Log metrics
-        print(summary)
+        logging.info(summary)
         if summary:
             for key, value in summary.items():
                 if "accuracy" in key:
                     self.log(key, value, prog_bar=True, logger=True)
                 else:
                     self.log(key, value, prog_bar=False, logger=True)
+        
         self.validation_step_outputs.clear()
         return summary
 
