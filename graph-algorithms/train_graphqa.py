@@ -373,7 +373,6 @@ if __name__ == "__main__":
         #     os.system(f"rm -rf {default_root_dir}")
         
         checkpoint_callback = ModelCheckpoint(
-            monitor="accuracy",
             dirpath=default_root_dir,
             filename="epoch_{epoch}",
             save_top_k=1,
