@@ -164,6 +164,15 @@ class MultitaskModel(pl.LightningModule):
             gold_answers[gold_answers == -100] = self.tokenizer.pad_token_id
             output_len = (gold_answers != self.tokenizer.pad_token_id).sum(dim=1).max().item()
 
+            ''' Compute the logits of the labels '''
+            is_label_mask = batch["labels"][:, 1:].contiguous() != -100
+            logits = forward_output["logits"][:, :-1].contiguous()
+            preds = logits[is_label_mask]
+            preds = torch.argmax(preds, dim=-1).cpu().numpy()
+
+            labels = batch["labels"][:, 1:][is_label_mask]
+            labels = labels.cpu().numpy()
+
             generate_output = self.generate_output
             if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
                 generate_output = False
@@ -214,6 +223,8 @@ class MultitaskModel(pl.LightningModule):
             "loss": forward_output['loss'],
             "answers": gold_answers,
             "generates": output,
+            "pred_ids": preds,
+            "label_ids": labels,
         }
         if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
             output_dict.update({"graph_accuracy": forward_output.graph_accuracy})
@@ -354,6 +365,7 @@ class MultitaskModel(pl.LightningModule):
         Note, `all_gather` *concatenates* tensors from all GPUs along the first dimension.
         """
         summary = {f"{task_name}_loss": 0 for task_name in self.task_names}
+        summary.update({f"{task_name}_accuracy_score": 0 for task_name in self.task_names})
         summary.update({f"{task_name}_accuracy": 0 for task_name in self.task_names})
         summary.update({f"{task_name}_edit_distance": 0 for task_name in self.task_names})
 
@@ -379,14 +391,16 @@ class MultitaskModel(pl.LightningModule):
                 if task_counts[task_name] > 0:
                     summary[f"{task_name}_loss"] /= task_counts[task_name]
                     summary[f"{task_name}_accuracy"] /= task_counts[task_name]
-        if generate_output:
-            task_counts = {task_name: 0 for task_name in self.task_names}
-            for step, batch in enumerate(outputs):
-                task_name = batch["task_name"]
-                if len(batch["answers"]) == 0:
-                    continue
-                summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["answers"]) if torch.isnan(batch["loss"]) == False else 0
 
+        task_counts = {task_name: 0 for task_name in self.task_names}
+        label_counts = {task_name: 0 for task_name in self.task_names}
+        for step, batch in enumerate(outputs):
+            task_name = batch["task_name"]
+            if len(batch["answers"]) == 0:
+                continue
+            summary[f"{task_name}_loss"] += batch["loss"].item()*len(batch["answers"]) if torch.isnan(batch["loss"]) == False else 0
+            summary[f"{task_name}_accuracy_score"] += accuracy_score(batch["label_ids"], batch["pred_ids"])*len(batch["label_ids"])*100
+            if generate_output:
                 pred_answers = self.tokenizer.batch_decode(batch['generates'], skip_special_tokens=True)
                 gold_answers = self.tokenizer.batch_decode(batch['answers'], skip_special_tokens=True)
                 if step == 0:
@@ -410,20 +424,26 @@ class MultitaskModel(pl.LightningModule):
                 metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
                 summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
                 summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
-                task_counts[task_name] += len(batch["answers"])
-            
-            for task_name in self.task_names:
-                if task_counts[task_name] > 0:
-                    summary[f"{task_name}_loss"] /= task_counts[task_name]
+            task_counts[task_name] += len(batch["answers"])
+            label_counts[task_name] += batch["label_ids"].shape[0]
+        
+        for task_name in self.task_names:
+            if task_counts[task_name] > 0:
+                summary[f"{task_name}_loss"] /= task_counts[task_name]
+                summary[f"{task_name}_accuracy_score"] = (summary[f"{task_name}_accuracy_score"]/label_counts[task_name]) if label_counts[task_name] > 0 else 0
+
+                if generate_output:
                     summary[f"{task_name}_accuracy"] /= task_counts[task_name]
                     summary[f"{task_name}_edit_distance"] /= task_counts[task_name]
 
         # average accuracy and f1 score
-        summary.update({"accuracy": np.mean([summary[f"{task_name}_accuracy"] for task_name in self.task_names])})
-        summary.update({"edit_distance": np.mean([summary[f"{task_name}_edit_distance"] for task_name in self.task_names])})
+        summary.update({"accuracy_score": np.mean([summary[f"{task_name}_accuracy_score"] for task_name in self.task_names])})
+        if generate_output:
+            summary.update({"accuracy": np.mean([summary[f"{task_name}_accuracy"] for task_name in self.task_names])})
+            summary.update({"edit_distance": np.mean([summary[f"{task_name}_edit_distance"] for task_name in self.task_names])})
 
         # Log metrics
-        logging.info(summary)
+        print(summary)
         if summary:
             for key, value in summary.items():
                 if "accuracy" in key:

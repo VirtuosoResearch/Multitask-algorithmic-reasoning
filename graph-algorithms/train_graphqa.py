@@ -275,6 +275,7 @@ if __name__ == "__main__":
     parser.add_argument("--write_results", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--generate_output", action="store_true")
+    parser.add_argument("--remove_checkpoint", action="store_true")
 
     args = parser.parse_args()
     args.enable_checkpointing = not args.disable_checkpointing
@@ -376,7 +377,7 @@ if __name__ == "__main__":
             dirpath=default_root_dir,
             filename="epoch_{epoch}",
             save_top_k=1,
-            monitor='train_loss',
+            monitor='loss',
             save_last=True,
             mode="min",
         )
@@ -455,7 +456,7 @@ if __name__ == "__main__":
             metrics[key].append(summary[key])
 
         # delete the whole model checkpoint and only keep the lora parameters
-        if args.train_lora or args.train_adapter:
+        if args.train_lora or args.train_adapter or args.remove_checkpoint:
             os.system(f"rm {checkpoint_callback.best_model_path}")
     
     for key in metrics:
