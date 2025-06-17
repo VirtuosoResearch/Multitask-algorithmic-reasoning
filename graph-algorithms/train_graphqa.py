@@ -377,9 +377,9 @@ if __name__ == "__main__":
             dirpath=default_root_dir,
             filename="epoch_{epoch}",
             save_top_k=1,
-            monitor='loss',
+            monitor='accuracy_score',
             save_last=True,
-            mode="min",
+            mode="max",
         )
 
         trainer = pl.Trainer(accelerator="gpu", devices=args.devices, strategy=args.strategy,
