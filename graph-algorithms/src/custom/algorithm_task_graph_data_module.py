@@ -396,7 +396,7 @@ class CasualLMInstructionCollator:
         sources = []; source_lengths = []
         for idx, instance in enumerate(converted_batch):
             # right now only use the special token for the nodes positions in the graphs. TODO: we can define some text instruction
-            source = instance["input"].split("\n")[0]
+            source = "Given a graph: " # instance["input"].split("\n")[0]
             source += "".join([self.special_token_for_graphs]*graph_sizes[idx]) 
             source += instance["input"].split("\n")[-2]
             tokenized_source = self.tokenizer(source)["input_ids"]

@@ -14,6 +14,7 @@ import glob
 import tqdm
 import random
 
+from src.utils.invariant_subgraph import extract_target_node, create_token_mask_node_degree
 from src.utils.multitask_dataset import MultitaskDataset, MultitaskBatchSampler, MultitaskCollator
 from datasets import load_dataset
 
@@ -75,6 +76,7 @@ class CasualLMInstructionCollator:
     pad_to_multiple_of: Optional[int] = None 
     label_pad_token_id: int = -100
     return_tensors: str = "pt"
+    task_name: str = None
 
     def __call__(self, batch, return_tensors=None):
 
@@ -110,6 +112,15 @@ class CasualLMInstructionCollator:
 
         inputs = [source + " " + label for source, label in zip(sources, labels)]
 
+        # generate invariant subgraph mask if available
+        if self.task_name is not None:
+            masks = [create_token_mask_node_degree(
+                text=text,
+                tokenizer=self.tokenizer,
+                target_node=extract_target_node(source),
+                max_length=self.max_source_length) for text in inputs]
+            masks = torch.tensor(np.stack(masks), dtype=torch.int64)
+
         model_inputs = self.tokenizer(
                 text = inputs, 
                 max_length=self.max_source_length, 
@@ -122,7 +133,9 @@ class CasualLMInstructionCollator:
         label_mask = model_inputs["attention_mask"].clone().bool()
         model_inputs["labels"] = model_inputs["labels"].masked_fill(~label_mask, self.label_pad_token_id)
         for i, length in enumerate(source_lengths):
-            model_inputs["labels"][i, :length] = self.label_pad_token_id            
+            model_inputs["labels"][i, :length] = self.label_pad_token_id     
+        if self.task_name is not None:
+            model_inputs["invariant_mask"] = masks       
 
         if "weights" in converted_batch[0]:
             model_inputs["weights"] = torch.Tensor([instance["weights"] for instance in converted_batch])
@@ -254,7 +267,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             self.task_to_valid_datasets[extended_task_name] = eval_dataset
             self.task_to_test_datasets[extended_task_name] = predict_dataset
             self.task_to_collators[extended_task_name] = CasualLMInstructionCollator(self.tokenizer, padding="max_length", 
-                                                    max_source_length=self.max_input_length, max_target_length=self.max_output_length)
+                                                    max_source_length=self.max_input_length, max_target_length=self.max_output_length, task_name=task_name)
 
         self.multitask_train_dataset = MultitaskDataset(self.task_to_train_datasets)
         self.multitask_valid_dataset = MultitaskDataset(self.task_to_valid_datasets)
