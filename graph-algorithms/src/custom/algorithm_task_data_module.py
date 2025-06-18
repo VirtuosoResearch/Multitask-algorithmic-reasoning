@@ -267,7 +267,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             self.task_to_valid_datasets[extended_task_name] = eval_dataset
             self.task_to_test_datasets[extended_task_name] = predict_dataset
             self.task_to_collators[extended_task_name] = CasualLMInstructionCollator(self.tokenizer, padding="max_length", 
-                                                    max_source_length=self.max_input_length, max_target_length=self.max_output_length, task_name=task_name)
+                                                    max_source_length=self.max_input_length, max_target_length=self.max_output_length, task_name=task_name if task_name =="node_degree" else None)
 
         self.multitask_train_dataset = MultitaskDataset(self.task_to_train_datasets)
         self.multitask_valid_dataset = MultitaskDataset(self.task_to_valid_datasets)

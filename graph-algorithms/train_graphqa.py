@@ -6,6 +6,7 @@ import wandb
 from src.custom.algorithm_task_data_module import AlgorithmDataModule
 from src.custom.algorithm_task_graph_data_module import AlgorithmGraphDataModule
 from src.model.GraphLlama_Graphqa import GraphLlamaForCausalLM_GraphQA
+from src.model.qwen2_mixup import Qwen2MixupForCausalLM
 from src.custom.multitask_model_graphqa import MultitaskModel_GraphQA
 from src.custom.multitask_model import MultitaskModel
 
@@ -86,7 +87,11 @@ def initialize_model(args):
         append_eos = False  # t5 tokenizers already append eos
     elif "Qwen" in model_key:
         hf_key = args.model_key.replace("_", "-")
-        model = AutoModelForCausalLM.from_pretrained(hf_key)
+        if args.train_invariant_mix:
+            model = Qwen2MixupForCausalLM.from_pretrained(hf_key)
+            model.set_alpha(args.invariant_mix_alpha)
+        else:
+            model = AutoModelForCausalLM.from_pretrained(hf_key)
         tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=512)
         model_type = "decoder"
         append_eos = True
@@ -277,6 +282,9 @@ if __name__ == "__main__":
     parser.add_argument("--generate_output", action="store_true")
     parser.add_argument("--remove_checkpoint", action="store_true")
 
+    parser.add_argument("--train_invariant_mix", action="store_true")
+    parser.add_argument("--invariant_mix_alpha", type=float, default=0.1)
+
     args = parser.parse_args()
     args.enable_checkpointing = not args.disable_checkpointing
     print("arguments".upper().center(80, "-"))
@@ -343,10 +351,11 @@ if __name__ == "__main__":
         data_module.setup(stage="fit")
 
         extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
-        model_cls = MultitaskModel_GraphQA if args.use_graph_llama else MultitaskModel
+        model_cls = MultitaskModel # MultitaskModel_GraphQA if args.use_graph_llama else
         lm = model_cls(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names,
+                        train_invariant_mix=args.train_invariant_mix)
         
         load_model_dir = args.load_model_dir
         load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
@@ -456,8 +465,14 @@ if __name__ == "__main__":
             metrics[key].append(summary[key])
 
         # delete the whole model checkpoint and only keep the lora parameters
-        if args.train_lora or args.train_adapter or args.remove_checkpoint:
+        if args.train_lora or args.train_adapter:
             os.system(f"rm {checkpoint_callback.best_model_path}")
+        
+        if args.remove_checkpoint:
+            if os.path.exists(default_root_dir):
+                os.system(f"rm -r {default_root_dir}")
+            else:
+                print(f"Directory {default_root_dir} does not exist, skipping removal.")
     
     for key in metrics:
         logging.info("{}: {:.4f} +/- {:.4f}".format(key, np.mean(metrics[key]), np.std(metrics[key])))

@@ -30,7 +30,7 @@ class MultitaskModel(pl.LightningModule):
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
                 compute_gradients_seed = 0, project_gradients_dim = 200, gradients_dir = "test", 
-                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False):
+                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False, train_invariant_mix=False):
         """
         - completion_metadata: metaddata used to save completions. If None, completions are not saved.
           `epoch_N` is appended to the `train_key` when saving intermediate validation completions.
@@ -74,6 +74,8 @@ class MultitaskModel(pl.LightningModule):
         self.start_step = start_step
         self.evaluate_cot = evaluate_cot # For GraphWiz
 
+        self.train_invariant_mix = train_invariant_mix
+
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\
                 if (name in self.param_names) and (not any([key in name for key in self.removing_keys]))]
@@ -93,6 +95,8 @@ class MultitaskModel(pl.LightningModule):
             kwargs["original_input_ids"] = batch["original_input_ids"]
         if self.model_type == "encoder_decoder":
             kwargs["decoder_attention_mask"] = batch["decoder_attention_mask"]
+        if self.train_invariant_mix:
+            kwargs["invariant_mask"] = batch["invariant_mask"]
         
         if self.use_sample_weights:
             logits = self.model(**kwargs)["logits"]
