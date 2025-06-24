@@ -1,0 +1,5 @@
+1: bfs dfs bellman_ford
+1: mst_kruskal
+2: bfs dfs
+2: bellman_ford
+2: mst_kruskal

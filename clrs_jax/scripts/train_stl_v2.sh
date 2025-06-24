@@ -2,8 +2,7 @@ for algorithm in "mst_kruskal" "mst_prim" "dijkstra" "bellman_ford" 'dag_shortes
 do
 for dim in 16
 do
-CUDA_VISIBLE_DEVICES=1 python -m clrs.examples.run --algorithms $algorithm --use_projection --projection_dim $dim
+CUDA_VISIBLE_DEVICES=1 python -m clrs.examples.run --algorithms $algorithm\
+    --processor_type "edge_t" --num_layers 5
 done
 done
-
-

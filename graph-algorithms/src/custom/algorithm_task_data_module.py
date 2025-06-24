@@ -157,7 +157,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
     def __init__(
         self,
         task_names, 
-        prompt_styles,
+        graph_types,
         text_encoders,
         node_range,
         tokenizer,
@@ -175,7 +175,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
         super().__init__()
 
         self.task_names = task_names # task_name
-        self.prompt_styles = prompt_styles # zero_shot, zero_cot, few_shot, few_cot
+        self.graph_types = graph_types # zero_shot, zero_cot, few_shot, few_cot
         self.text_encoders = text_encoders 
         self.min_nodes = node_range[0]
         self.max_nodes = node_range[1]
@@ -205,11 +205,11 @@ class AlgorithmDataModule(pl.LightningDataModule):
         self.task_to_collators = {}
         self.task_to_templates = {}
         for i, task_name in enumerate(self.task_names):
-            prompt_style = self.prompt_styles[i]
+            graph_type = self.graph_types[i]
             text_encoder = self.text_encoders[i]
 
             # Split the dataset into train and validation
-            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_train.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_zero_shot_{}_train.json".format(self.min_nodes, self.max_nodes, task_name, graph_type)
             train_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
@@ -217,7 +217,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             train_dataset = train_dataset.map(convert_format(), batched=True, remove_columns=column_names)
 
-            task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            task_file_dir = "data/tasks/nodes_{}_{}/{}_zero_shot_{}_test.json".format(self.min_nodes, self.max_nodes, task_name, graph_type)
             eval_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # fileter out the examples by the text encoder
             column_names = eval_dataset.column_names
@@ -225,7 +225,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
             # convert the input and output format
             eval_dataset = eval_dataset.map(convert_format(), batched=True, remove_columns=column_names)
             
-            # task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_test.json".format(self.min_nodes, self.max_nodes, task_name, prompt_style)
+            # task_file_dir = "data/tasks/nodes_{}_{}/{}_{}_er_test.json".format(self.min_nodes, self.max_nodes, task_name, graph_type)
             # predict_dataset = load_dataset("json", data_files=task_file_dir)['train']
             # # fileter out the examples by the text encoder
             # column_names = predict_dataset.column_names
@@ -261,7 +261,7 @@ class AlgorithmDataModule(pl.LightningDataModule):
                 min_sample = max(int(self.minimum_sample_validation), int(self.downsample_rate*len(predict_dataset)))
                 predict_dataset = predict_dataset.select(permutations[:min_sample])
             
-            extended_task_name = task_name + "_" + prompt_style
+            extended_task_name = task_name + "_" + graph_type
             print("Task: {} train dataset size: {} validation dataset size: {} test dataset size: {}".format(extended_task_name, len(train_dataset), len(eval_dataset), len(predict_dataset)))
             self.task_to_train_datasets[extended_task_name] = train_dataset
             self.task_to_valid_datasets[extended_task_name] = eval_dataset

@@ -43,7 +43,6 @@ torch.set_float32_matmul_precision("high")
 # TODO: 
 #   1. change cycle check output to just yes or no
 #   1. change to classification tasks
-#   2. tune gnn encoders
 
 def add_result_to_csv(result_datapoint, file_name):
     for key, val in result_datapoint.items():
@@ -226,11 +225,19 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check', 'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
     parser.add_argument("--task_names", type=str, nargs="+", default=['edge_existence']) 
-    parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot']) # add graph generator behind like "zero_shot_ba"
+    parser.add_argument("--graph_types", type=str, nargs="+", default=['er'])
     # "adjacency" "incident" "friendship" "south_park" "got" "politician" "social_network" "expert" "coauthorship" "random" 
     parser.add_argument("--text_encoders", type=str, nargs="+", default=['adjacency']) 
     parser.add_argument("--min_nodes", type=int, default=20)
     parser.add_argument("--max_nodes", type=int, default=30)
+
+    parser.add_argument("--eval_task_names", type=str, nargs="+", default=None)
+    parser.add_argument("--eval_graph_types", type=str, nargs="+", default=None) 
+    parser.add_argument("--eval_text_encoders", type=str, nargs="+", default=None)
+    parser.add_argument("--eval_min_nodes", type=int, nargs="+", default=[20])
+    parser.add_argument("--eval_max_nodes", type=int, nargs="+", default=[30])
+    parser.add_argument("--eval_max_length", type=int, default=2048)
+    parser.add_argument("--eval_max_output_length", type=int, default=64)
 
     parser.add_argument("--model_key", type=str, default="gpt2")
     parser.add_argument("--batch_size", type=int, default=8)
@@ -257,14 +264,6 @@ if __name__ == "__main__":
     parser.add_argument("--use_qadapter", action="store_true")
 
     parser.add_argument("--use_graph_llama", action="store_true")
-    # parser.add_argument("--only_train_graph", action="store_true") # pretraining gnn 
-    # parser.add_argument("--test_classifier_before_cross_attn", action="store_true") # pretraining gnn
-    # parser.add_argument("--freeze_graph_tower", action="store_true")
-    # parser.add_argument("--freeze_embeddings", action="store_true")
-    # parser.add_argument("--use_cross_attn", action="store_true")
-    # parser.add_argument("--add_output_projection", action="store_true")
-    # parser.add_argument('--num_soft_prompts', type=int, default=15)
-
     parser.add_argument("--use_qlora", action="store_true")
     parser.add_argument("--use_3bit", action="store_true")
     parser.add_argument("--use_2bit", action="store_true")
@@ -321,7 +320,7 @@ if __name__ == "__main__":
         if args.use_graph_llama:
             data_module = AlgorithmGraphDataModule(
                 task_names=args.task_names,
-                prompt_styles=args.prompt_styles,
+                graph_types=args.graph_types,
                 text_encoders=args.text_encoders,
                 node_range=[args.min_nodes, args.max_nodes],
                 tokenizer=tokenizer,
@@ -336,7 +335,7 @@ if __name__ == "__main__":
         else:
             data_module = AlgorithmDataModule(
                 task_names=args.task_names,
-                prompt_styles=args.prompt_styles,
+                graph_types=args.graph_types,
                 text_encoders=args.text_encoders,
                 node_range=[args.min_nodes, args.max_nodes],
                 tokenizer=tokenizer,
@@ -350,7 +349,7 @@ if __name__ == "__main__":
                 minimum_samples_validation=args.minimum_samples_validation)
         data_module.setup(stage="fit")
 
-        extended_task_names = [f"{task_name}_{prompt_style}" for task_name, prompt_style in zip(args.task_names, args.prompt_styles)]
+        extended_task_names = [f"{task_name}_{graph_type}" for task_name, graph_type in zip(args.task_names, args.graph_types)]
         model_cls = MultitaskModel # MultitaskModel_GraphQA if args.use_graph_llama else
         lm = model_cls(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
@@ -456,6 +455,39 @@ if __name__ == "__main__":
                 trainer.validate_loop.inference_mode = False
             summary = trainer.validate(lm, datamodule=data_module)[0]
             logging.info(summary)
+        
+        # evaluate the model on the evaluation tasks
+        if args.eval_task_names is not None:
+            for i, eval_task_name in enumerate(args.eval_task_names):
+                eval_data_module = AlgorithmDataModule(
+                task_names=[eval_task_name],
+                graph_types=[args.eval_graph_types[i]],
+                text_encoders=[args.eval_text_encoders[i]],
+                node_range=[args.eval_min_nodes[i], args.eval_max_nodes[i]],
+                tokenizer=tokenizer,
+                batch_size=batch_size,
+                inference_batch_size=inference_batch_size,
+                max_input_length=args.eval_max_length,
+                max_output_length=args.eval_max_output_length,
+                eval_all=True,
+                downsample_ratio=args.downsample_ratio,
+                minimum_samples=args.minimum_samples,
+                minimum_samples_validation=args.minimum_samples_validation)
+                eval_data_module.setup(stage="fit")
+
+                extended_eval_task_name = f"{eval_task_name}_{args.eval_graph_types[i]}"
+                train_task_names = lm.task_names # replace with the current task names
+                lm.task_names = [extended_eval_task_name]
+                eval_summary = trainer.validate(lm, datamodule=eval_data_module)[0]
+                lm.task_names = train_task_names
+                logging.info(eval_summary)
+
+                for key in eval_summary:
+                    metric_key = f"eval_{key}_node_{args.eval_min_nodes[i]}_{args.eval_max_nodes[i]}"
+                    if metric_key not in metrics:
+                        metrics[metric_key] = []
+                    metrics[metric_key].append(eval_summary[key])
+
         end_time = time.time()
         print(f"Evaluation time: {end_time - start_time}")
             
@@ -475,7 +507,7 @@ if __name__ == "__main__":
                 print(f"Directory {default_root_dir} does not exist, skipping removal.")
     
     for key in metrics:
-        logging.info("{}: {:.4f} +/- {:.4f}".format(key, np.mean(metrics[key]), np.std(metrics[key])))
+        print("{}: {:.4f} +/- {:.4f}".format(key, np.mean(metrics[key]), np.std(metrics[key])))
     
     # save indexes 
     if args.write_results:
