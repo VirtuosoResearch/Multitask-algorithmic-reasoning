@@ -5,6 +5,7 @@ from transformers import DataCollatorForLanguageModeling
 from transformers.data.data_collator import *
 from torch.utils.data import BatchSampler
 
+from src.utils.multitask_dataset import MultitaskDataset, MultitaskBatchSampler, MultitaskCollator
 from datasets import concatenate_datasets
 from datasets import load_dataset
 
@@ -384,6 +385,12 @@ class MATHDataModule(pl.LightningDataModule):
         self.minimum_sample_validation = minimum_samples_validation
 
     def setup(self, stage=None):
+        self.task_to_train_datasets = {}
+        self.task_to_valid_datasets = {}
+        self.task_to_test_datasets = {}
+        self.task_to_collators = {}
+        self.task_to_templates = {}
+
         train_datasets = []; test_datasets = []
         for topic in ['algebra', 'counting_and_probability', 'geometry', 'intermediate_algebra', 'number_theory', 'prealgebra', 'precalculus']:
             tmp_dataset = load_dataset("EleutherAI/hendrycks_math", topic)
@@ -422,8 +429,8 @@ class MATHDataModule(pl.LightningDataModule):
             min_sample = max(int(self.minimum_sample_validation), int(self.downsample_rate*len(predict_dataset)))
             predict_dataset = predict_dataset.select(permutations[:min_sample])
 
-        self.collator = CasualLMInstructionCollator(self.tokenizer, padding="max_length", 
-                            max_source_length=self.max_input_length, max_target_length=self.max_output_length)
+        # self.collator = CasualLMInstructionCollator(self.tokenizer, padding="max_length", 
+        #                     max_source_length=self.max_input_length, max_target_length=self.max_output_length)
 
         if hasattr(self, "residuals") and hasattr(self, "weights"):
             cur_len = 0
@@ -438,35 +445,50 @@ class MATHDataModule(pl.LightningDataModule):
 
             print("Weights and residuals loaded!", "Weights mean: ", self.weights.mean(), "Residuals mean: ", self.residuals.mean())
 
+        print("Task: MATH train dataset size: {} validation dataset size: {} test dataset size: {}".format(len(train_dataset), len(eval_dataset), len(predict_dataset)))
+
         self.train_dataset = train_dataset
         self.eval_dataset = eval_dataset
         self.predict_dataset = predict_dataset
 
+        self.task_to_train_datasets["math"] = train_dataset
+        self.task_to_valid_datasets["math"] = eval_dataset
+        self.task_to_test_datasets["math"] = predict_dataset
+        self.task_to_collators["math"] = CasualLMInstructionCollator(self.tokenizer, padding="max_length", 
+                            max_source_length=self.max_input_length, max_target_length=self.max_output_length)
+
+        self.multitask_train_dataset = MultitaskDataset(self.task_to_train_datasets)
+        self.multitask_valid_dataset = MultitaskDataset(self.task_to_valid_datasets)
+        self.multitask_test_dataset = MultitaskDataset(self.task_to_test_datasets)
+        self.multitask_collator = MultitaskCollator(self.task_to_collators)
+        self.multitask_train_sampler = MultitaskBatchSampler(sampler=np.arange(sum([len(dataset) for dataset in self.task_to_train_datasets.values()])), 
+                                                                batch_size=self.batch_size, drop_last=False, task_to_datasets=self.task_to_train_datasets, shuffle=self.shuffle_train)
+        self.multitask_valid_sampler = MultitaskBatchSampler(sampler=np.arange(sum([len(dataset) for dataset in self.task_to_valid_datasets.values()])), 
+                                                                batch_size=self.inference_batch_size, drop_last=False, task_to_datasets=self.task_to_valid_datasets, shuffle=False)
+        self.multitask_test_sampler = MultitaskBatchSampler(sampler=np.arange(sum([len(dataset) for dataset in self.task_to_test_datasets.values()])), 
+                                                                batch_size=self.inference_batch_size, drop_last=False, task_to_datasets=self.task_to_test_datasets, shuffle=False)
 
     def train_dataloader(self):
         return DataLoader(
-            self.train_dataset,
-            shuffle=self.shuffle_train,
-            collate_fn=self.collator,
-            batch_size=self.batch_size,
+            self.multitask_train_dataset,
+            batch_sampler=self.multitask_train_sampler,
+            collate_fn=self.multitask_collator,
             num_workers=15
         )
 
     def val_dataloader(self):
         return DataLoader(
-            self.eval_dataset,
-            shuffle=False,
-            collate_fn=self.collator,
-            batch_size=self.inference_batch_size,
+            self.multitask_valid_dataset,
+            batch_sampler=self.multitask_valid_sampler,
+            collate_fn=self.multitask_collator,
             num_workers=15
         )
 
     def test_dataloader(self):
         return DataLoader(
-            self.predict_dataset,
-            shuffle=False,
-            collate_fn=self.collator,
-            batch_size=self.inference_batch_size,
+            self.multitask_test_dataset,
+            batch_sampler=self.multitask_test_sampler,
+            collate_fn=self.multitask_collator,
             num_workers=15
         )
         

@@ -13,6 +13,7 @@ import os
 from sklearn.metrics import accuracy_score, f1_score
 from src.utils.compute_metrics import compute_accuracy
 from pynvml import *
+from src.utils.math_utils import eval_results_math, eval_results_gsm8k
 
 def print_gpu_utilization():
     nvmlInit()
@@ -20,6 +21,13 @@ def print_gpu_utilization():
     info = nvmlDeviceGetMemoryInfo(handle)
     # print(info.used, info.total)
     print(f"GPU memory occupied: {info.used//1024**2} MB.")
+
+
+'''
+TODO:
+- Add eval for math outputs
+- Modify compute gradients
+'''
 
 class MultitaskModel(pl.LightningModule):
     validation_predictions: Dict
@@ -30,7 +38,7 @@ class MultitaskModel(pl.LightningModule):
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
                 compute_gradients_seed = 0, project_gradients_dim = 200, gradients_dir = "test", 
-                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False, train_invariant_mix=False):
+                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False, train_invariant_mix=False, eval_math=False):
         """
         - completion_metadata: metaddata used to save completions. If None, completions are not saved.
           `epoch_N` is appended to the `train_key` when saving intermediate validation completions.
@@ -73,7 +81,7 @@ class MultitaskModel(pl.LightningModule):
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
         self.evaluate_cot = evaluate_cot # For GraphWiz
-
+        self.eval_math = eval_math # For MATH/GSM8K dataset
         self.train_invariant_mix = train_invariant_mix
 
     def get_trainable_parameters(self):
@@ -428,6 +436,15 @@ class MultitaskModel(pl.LightningModule):
                 metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
                 summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
                 summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
+            
+                if self.eval_math:
+                    correct = 0; count = 0; eval_func = eval_results_math if task_name == "math" else eval_results_gsm8k
+                    for pred, gold in zip(pred_answers, gold_answers):
+                        if eval_func(pred, gold[0]):
+                            correct += 1
+                        count += 1
+                    summary[f"{task_name}_reasoning_accuracy"] += correct/count*100
+
             task_counts[task_name] += len(batch["answers"])
             label_counts[task_name] += batch["label_ids"].shape[0]
         
@@ -439,12 +456,16 @@ class MultitaskModel(pl.LightningModule):
                 if generate_output:
                     summary[f"{task_name}_accuracy"] /= task_counts[task_name]
                     summary[f"{task_name}_edit_distance"] /= task_counts[task_name]
+                    if self.eval_math:
+                        summary[f"{task_name}_reasoning_accuracy"] /= task_counts[task_name]
 
         # average accuracy and f1 score
         summary.update({"accuracy_score": np.mean([summary[f"{task_name}_accuracy_score"] for task_name in self.task_names])})
         if generate_output:
             summary.update({"accuracy": np.mean([summary[f"{task_name}_accuracy"] for task_name in self.task_names])})
             summary.update({"edit_distance": np.mean([summary[f"{task_name}_edit_distance"] for task_name in self.task_names])})
+            if self.eval_math:
+                summary.update({"reasoning_accuracy": np.mean([summary[f"{task_name}_reasoning_accuracy"] for task_name in self.task_names])})
 
         # Log metrics
         print(summary)
