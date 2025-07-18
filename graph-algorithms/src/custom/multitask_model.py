@@ -240,6 +240,8 @@ class MultitaskModel(pl.LightningModule):
         }
         if hasattr(self.model, "only_train_graph") and self.model.only_train_graph:
             output_dict.update({"graph_accuracy": forward_output.graph_accuracy})
+        if "only_answer" in batch:
+            output_dict.update({"only_answer": batch["only_answer"]})
         self.validation_step_outputs.append(output_dict)
         return output_dict
     
@@ -380,6 +382,8 @@ class MultitaskModel(pl.LightningModule):
         summary.update({f"{task_name}_accuracy_score": 0 for task_name in self.task_names})
         summary.update({f"{task_name}_accuracy": 0 for task_name in self.task_names})
         summary.update({f"{task_name}_edit_distance": 0 for task_name in self.task_names})
+        if self.eval_math:
+            summary.update({f"{task_name}_reasoning_accuracy": 0 for task_name in self.task_names})
 
         # average loss
         outputs = self.validation_step_outputs
@@ -438,8 +442,11 @@ class MultitaskModel(pl.LightningModule):
                 summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
             
                 if self.eval_math:
+                    only_answer = self.tokenizer.batch_decode(batch['only_answer'], skip_special_tokens=True)
+                    if step == 0:
+                        print("only_answer", only_answer[:4])
                     correct = 0; count = 0; eval_func = eval_results_math if task_name == "math" else eval_results_gsm8k
-                    for pred, gold in zip(pred_answers, gold_answers):
+                    for pred, gold in zip(pred_answers, only_answer):
                         if eval_func(pred, gold[0]):
                             correct += 1
                         count += 1

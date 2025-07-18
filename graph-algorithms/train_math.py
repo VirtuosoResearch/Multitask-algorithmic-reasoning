@@ -66,6 +66,12 @@ def initialize_model(args):
         tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=512)
         model_type = "encoder_decoder"
         append_eos = False  # t5 tokenizers already append eos
+    elif "Qwen" in model_key:
+        hf_key = args.model_key.replace("_", "-")
+        model = AutoModelForCausalLM.from_pretrained(hf_key)
+        tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=2048)
+        model_type = "decoder"
+        append_eos = True
     else:
         raise NotImplementedError(args.model_key)
 
@@ -184,6 +190,7 @@ if __name__ == "__main__":
     parser.add_argument("--few_shot_k", type=int, default=0)
     parser.add_argument("--only_evaluate_test_set", action="store_true")
     parser.add_argument("--only_load_last_output", action="store_true")
+    parser.add_argument("--only_answer_output", action="store_true")
 
     parser.add_argument("--train_lora", action="store_true")
     parser.add_argument("--lora_rank", type=int, default=4)
@@ -238,10 +245,11 @@ if __name__ == "__main__":
                     max_output_length=args.max_output_length,
                     shuffle_train=True,
                     eval_split=0,
-                    downsample_ratio=1.0,  # ratio of downsampling
-                    minimum_samples=10000,
-                    minimum_samples_validation=10000,
+                    downsample_ratio=args.downsample_ratio,  # ratio of downsampling
+                    minimum_samples=args.minimum_samples,
+                    minimum_samples_validation=args.minimum_samples_validation,
                     downsample_seed=0,
+                    only_answer_output=args.only_answer_output,
                 )
         elif args.task_names[0] == 'math':
             data_module = MATHDataModule(
@@ -252,10 +260,11 @@ if __name__ == "__main__":
                     max_output_length=args.max_output_length,
                     shuffle_train=True,
                     eval_split=0,
-                    downsample_ratio=1.0,  # ratio of downsampling
-                    minimum_samples=10000,
-                    minimum_samples_validation=10000,
+                    downsample_ratio=args.downsample_ratio,  # ratio of downsampling
+                    minimum_samples=args.minimum_samples,
+                    minimum_samples_validation=args.minimum_samples_validation,
                     downsample_seed=0,
+                    only_answer_output=args.only_answer_output,
                 )
         
         data_module.setup(stage="fit")
@@ -286,6 +295,8 @@ if __name__ == "__main__":
                                         f"{model_key}_" + \
                                         ("_".join(extended_task_names) if len("_".join(extended_task_names)) <= 100 else "{}_tasks".format(len(extended_task_names))) + \
                                         (f"_lora_r_{args.lora_rank}" if args.train_lora else "") + \
+                                        (f"_samples_{args.minimum_samples}") + \
+                                        ("_only_answer" if args.only_answer_output else "") + \
                                         (f"_{args.save_name}" if args.save_name else "") + \
                                         f"_run_{run}"
                                         )
@@ -294,11 +305,11 @@ if __name__ == "__main__":
         #     os.system(f"rm -rf {default_root_dir}")
         
         checkpoint_callback = ModelCheckpoint(
-            monitor="accuracy",
+            monitor="loss",
             dirpath=default_root_dir,
             filename="epoch_{epoch}",
             save_top_k=(-1 if args.save_every_epoch else 1),
-            mode="max",
+            mode="min",
         )
 
         trainer = pl.Trainer(accelerator="gpu", devices=args.devices, strategy=args.strategy,

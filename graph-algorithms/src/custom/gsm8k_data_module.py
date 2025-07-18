@@ -18,11 +18,16 @@ class convert_format:
         "Write a response that appropriately completes the request.\n\n"
         "### Instruction:\n{instruction}\n\n### Response: Let's think step by step."
     )
+    def __init__(self, only_answer_output=False):
+        self.only_answer_output = only_answer_output
 
     def __call__(self, examples):
         examples["input"] = [self.problem_prompt.format(instruction=item) for item in examples['question']]
-        examples["output"] = [item for item in examples["answer"]]
         examples["only_answer"] = [answer.split('#### ')[1].replace(',', '') if '#### ' in answer else answer for answer in examples["answer"]]
+        if self.only_answer_output:
+            examples["output"] = [f"The answer is: {answer}" for answer in examples["only_answer"]]
+        else:
+            examples["output"] = [item for item in examples["answer"]]
         return examples
 
 
@@ -90,6 +95,15 @@ class CasualLMInstructionCollator:
         if "residuals" in converted_batch[0]:
             model_inputs["residuals"] = torch.Tensor([instance["residuals"] for instance in converted_batch])
         
+        only_answer = self.tokenizer(
+            [instance["only_answer"] for instance in converted_batch],
+            max_length=32,
+            padding=self.padding,
+            return_tensors=self.return_tensors,
+            truncation=True
+        )
+        model_inputs["only_answer"] = only_answer["input_ids"]
+
         return model_inputs
 
 class GSM8KDataModule(pl.LightningDataModule):
@@ -107,6 +121,7 @@ class GSM8KDataModule(pl.LightningDataModule):
         minimum_samples=100,
         minimum_samples_validation=100,
         downsample_seed=0,
+        only_answer_output=False
     ):
         super().__init__()
 
@@ -125,6 +140,7 @@ class GSM8KDataModule(pl.LightningDataModule):
         self.downsample_seed = downsample_seed
         self.minimum_sample = minimum_samples
         self.minimum_sample_validation = minimum_samples_validation
+        self.only_answer_output = only_answer_output
 
     def setup(self, stage=None):
         self.task_to_train_datasets = {}
@@ -138,8 +154,8 @@ class GSM8KDataModule(pl.LightningDataModule):
         train_dataset = dataset['train']
         predict_dataset = dataset['test']
 
-        train_dataset = train_dataset.map(convert_format(), batched=True)
-        predict_dataset = predict_dataset.map(convert_format(), batched=True)
+        train_dataset = train_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True)
+        predict_dataset = predict_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True)
 
         if self.eval_split != 0:
             tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split, seed=42)
@@ -190,7 +206,7 @@ class GSM8KDataModule(pl.LightningDataModule):
         self.predict_dataset = predict_dataset
 
         self.task_to_train_datasets["gsm8k"] = train_dataset
-        self.task_to_valid_datasets["gsm9k"] = eval_dataset
+        self.task_to_valid_datasets["gsm8k"] = eval_dataset
         self.task_to_test_datasets["gsm8k"] = predict_dataset
         self.task_to_collators["gsm8k"] = CasualLMInstructionCollator(self.tokenizer, padding="max_length", 
                             max_source_length=self.max_input_length, max_target_length=self.max_output_length)
