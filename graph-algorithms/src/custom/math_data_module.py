@@ -285,7 +285,7 @@ class convert_format:
         if self.only_answer_output:
             examples["output"] = [f"The answer is: {answer}" for answer in examples["only_answer"]]
         else:
-            examples["output"] = [item for item in examples["answer"]]
+            examples["output"] = [item + " The answer is: {}".format(examples["only_answer"][i]) for i, item in enumerate(examples["solution"])]
         return examples
 
 

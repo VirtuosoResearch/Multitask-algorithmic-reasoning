@@ -220,7 +220,9 @@ class MultitaskModel(pl.LightningModule):
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
                     output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
                                                 pad_token_id=self.tokenizer.pad_token_id,
-                                                eos_token_id=self.tokenizer.eos_token_id).detach()
+                                                eos_token_id=self.tokenizer.eos_token_id,
+                                                do_sample=True, temperature=0.8
+                                                ).detach()
                 input_len = inputs["input_ids"].shape[1]
                 output[:, :input_len] = self.tokenizer.pad_token_id
                 if not self.evaluate_cot:
@@ -352,7 +354,8 @@ class MultitaskModel(pl.LightningModule):
                 inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
                 output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
                                             pad_token_id=self.tokenizer.pad_token_id,
-                                            eos_token_id=self.tokenizer.eos_token_id).detach()
+                                            eos_token_id=self.tokenizer.eos_token_id,
+                                            do_sample=True, temperature=0.8).detach()
             input_len = inputs["input_ids"].shape[1]
             output[:, :input_len] = self.tokenizer.pad_token_id
             if not self.evaluate_cot:
@@ -450,7 +453,7 @@ class MultitaskModel(pl.LightningModule):
                         if eval_func(pred, gold[0]):
                             correct += 1
                         count += 1
-                    summary[f"{task_name}_reasoning_accuracy"] += correct/count*100
+                    summary[f"{task_name}_reasoning_accuracy"] += correct * 100
 
             task_counts[task_name] += len(batch["answers"])
             label_counts[task_name] += batch["label_ids"].shape[0]

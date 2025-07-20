@@ -27,7 +27,7 @@ class convert_format:
         if self.only_answer_output:
             examples["output"] = [f"The answer is: {answer}" for answer in examples["only_answer"]]
         else:
-            examples["output"] = [item for item in examples["answer"]]
+            examples["output"] = [item + " The answer is: {}".format(examples["only_answer"][i]) for i, item in enumerate(examples["answer"])]
         return examples
 
 
@@ -154,8 +154,8 @@ class GSM8KDataModule(pl.LightningDataModule):
         train_dataset = dataset['train']
         predict_dataset = dataset['test']
 
-        train_dataset = train_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True)
-        predict_dataset = predict_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True)
+        train_dataset = train_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True, load_from_cache_file=False)
+        predict_dataset = predict_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True, load_from_cache_file=False)
 
         if self.eval_split != 0:
             tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split, seed=42)

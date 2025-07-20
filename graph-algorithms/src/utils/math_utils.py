@@ -314,6 +314,10 @@ def eval_results_math(completion, answer):
 def eval_results_gsm8k(completion, answer):
     y_pred = extract_answer_number(completion)
     if y_pred != None:
-        return float(y_pred) == float(answer)
+        try:
+            res = float(y_pred) == float(answer)
+            return res
+        except:
+            return False
     else:
         return False
