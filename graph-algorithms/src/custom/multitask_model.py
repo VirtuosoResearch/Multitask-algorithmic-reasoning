@@ -25,7 +25,6 @@ def print_gpu_utilization():
 
 '''
 TODO:
-- Add eval for math outputs
 - Modify compute gradients
 '''
 
@@ -38,7 +37,7 @@ class MultitaskModel(pl.LightningModule):
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
                 compute_gradients_seed = 0, project_gradients_dim = 200, gradients_dir = "test", 
-                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False, train_invariant_mix=False, eval_math=False):
+                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False, train_invariant_mix=False, eval_math=False, eval_clrs=False):
         """
         - completion_metadata: metaddata used to save completions. If None, completions are not saved.
           `epoch_N` is appended to the `train_key` when saving intermediate validation completions.
@@ -82,6 +81,7 @@ class MultitaskModel(pl.LightningModule):
         self.start_step = start_step
         self.evaluate_cot = evaluate_cot # For GraphWiz
         self.eval_math = eval_math # For MATH/GSM8K dataset
+        self.eval_clrs = eval_clrs # For CLRS dataset
         self.train_invariant_mix = train_invariant_mix
 
     def get_trainable_parameters(self):
@@ -208,7 +208,7 @@ class MultitaskModel(pl.LightningModule):
                     self.tokenizer.padding_side = 'right'
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-                    output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length,
+                    output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length, max_new_tokens=self.max_output_length,
                                                 pad_token_id=self.tokenizer.pad_token_id,
                                                 eos_token_id=self.tokenizer.eos_token_id).detach()
                 else:
@@ -218,7 +218,7 @@ class MultitaskModel(pl.LightningModule):
                     inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
                     self.tokenizer.padding_side = 'right'
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
-                    output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
+                    output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,max_new_tokens=self.max_output_length,
                                                 pad_token_id=self.tokenizer.pad_token_id,
                                                 eos_token_id=self.tokenizer.eos_token_id,
                                                 do_sample=True, temperature=0.8
@@ -342,7 +342,7 @@ class MultitaskModel(pl.LightningModule):
                 self.tokenizer.padding_side = 'right'
                 inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-                output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length,
+                output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length,max_new_tokens=self.max_output_length,
                                             pad_token_id=self.tokenizer.pad_token_id,
                                             eos_token_id=self.tokenizer.eos_token_id).detach()
             else:
@@ -352,7 +352,7 @@ class MultitaskModel(pl.LightningModule):
                 inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
                 self.tokenizer.padding_side = 'right'
                 inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
-                output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,
+                output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,max_new_tokens=self.max_output_length,
                                             pad_token_id=self.tokenizer.pad_token_id,
                                             eos_token_id=self.tokenizer.eos_token_id,
                                             do_sample=True, temperature=0.8).detach()
@@ -439,6 +439,21 @@ class MultitaskModel(pl.LightningModule):
                             gold_answers[i] = answer
                         else:
                             gold_answers[i] = answer
+                if self.eval_clrs:
+                    # For CLRS dataset, we need to remove the steps and only keep the answers
+                    for i, answer in enumerate(pred_answers):
+                        if "|" in answer:
+                            answer = answer[answer.index("|")+1:]
+                            pred_answers[i] = answer
+                        else:
+                            pred_answers[i] = answer
+                    for i, answer in enumerate(gold_answers):
+                        if "|" in answer:
+                            answer = answer[answer.index("|")+1:]
+                            gold_answers[i] = answer
+                        else:
+                            gold_answers[i] = answer
+                
                 gold_answers = [[answer] for answer in gold_answers]
                 metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
                 summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])

@@ -64,8 +64,6 @@ def initialize_model(args):
                 bnb_4bit_quant_type='nf4'
                 )
             model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) 
-        elif args.use_graph_llama:
-            model = GraphLlamaForCausalLM.from_pretrained(hf_key)
         else:
             model = AutoModelForCausalLM.from_pretrained(hf_key, torch_dtype=torch.bfloat16)
         model_type = "decoder"
@@ -76,6 +74,12 @@ def initialize_model(args):
         tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=512)
         model_type = "encoder_decoder"
         append_eos = False  # t5 tokenizers already append eos
+    elif "Qwen" in model_key:
+        hf_key = args.model_key.replace("_", "-")
+        model = AutoModelForCausalLM.from_pretrained(hf_key)
+        tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=args.max_length+ args.max_output_length)
+        model_type = "decoder"
+        append_eos = True
     else:
         raise NotImplementedError(args.model_key)
     
@@ -219,7 +223,6 @@ def initialize_model(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--task_names", type=str, nargs="+", default=['dfs']) 
-    # parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot']) 
     
     parser.add_argument("--model_key", type=str, default="gpt2")
     parser.add_argument("--batch_size", type=int, default=8)
@@ -245,7 +248,9 @@ if __name__ == "__main__":
     parser.add_argument("--test_lengths", type=int, nargs="+", default=[4])
     parser.add_argument("--few_shot_k", type=int, default=0)
     parser.add_argument("--only_evaluate_test_set", action="store_true")
-    parser.add_argument("--only_load_last_output", action="store_true")
+    parser.add_argument("--only_load_last_output", action="store_true")  # for graph-llama, only load the last output
+    parser.add_argument("--only_answer_output", action="store_true") # only load the last step
+    parser.add_argument("--eval_last_step", action="store_true") # only evaluate the last step of the output
 
     parser.add_argument("--use_graph_llama", action="store_true")
     parser.add_argument("--only_train_graph", action="store_true") # pretraining gnn 
@@ -284,7 +289,8 @@ if __name__ == "__main__":
     model_key = args.model_key.replace("/", "-").replace("..", "")
     save_name = model_key + \
                 (f"_{args.save_name}" if args.save_name else "") + \
-                (f"_lora_r_{args.lora_rank}" if args.train_lora else "")
+                (f"_lora_r_{args.lora_rank}" if args.train_lora else "") + \
+                (f"_use_only_answer_output" if args.only_answer_output else "")
     file_dir = os.path.join("./results/", save_name)
     if not os.path.exists(file_dir):
         os.mkdir(file_dir)
@@ -333,7 +339,8 @@ if __name__ == "__main__":
                     train_lengths=args.train_lengths,
                     test_lengths=args.test_lengths,
                     use_few_shot=(args.few_shot_k > 0), 
-                    few_shot_k=args.few_shot_k)
+                    few_shot_k=args.few_shot_k,
+                    only_answer_output=args.only_answer_output)
         data_module.setup(stage="fit")
         for name, param in model.named_parameters():
             if param.requires_grad:
@@ -342,7 +349,7 @@ if __name__ == "__main__":
         extended_task_names = [f"{task_name}" for task_name in args.task_names]
         lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb, 
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, eval_clrs=args.eval_last_step)
         
         load_model_dir = args.load_model_dir
         load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
@@ -350,7 +357,7 @@ if __name__ == "__main__":
             if ("ckpt" in load_model_dir) and os.path.exists(load_model_dir):
                 lm = MultitaskModel.load_from_checkpoint(load_model_dir, model=model, tokenizer=tokenizer, model_type=model_type,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, eval_clrs=args.eval_last_step)
                 print(f"Loaded model from {load_model_dir}")
             elif ("pt" in load_model_dir) and os.path.exists(load_model_dir):
                 if args.use_graph_llama:
@@ -394,13 +401,6 @@ if __name__ == "__main__":
             state_dict = model.state_dict()
             state_dict = {k: v.clone() for k, v in state_dict.items() if "lora" in k}
             torch.save(state_dict, model_path)
-        # elif args.train_adapter:
-        #     if not os.path.exists(default_root_dir):
-        #         os.makedirs(default_root_dir)
-        #     model_path = default_root_dir + "/initial_weights.pt"
-        #     state_dict = model.state_dict()
-        #     state_dict = {k: v for k, v in state_dict.items() if ("adapter" in k) or ("head" in k)}
-        #     torch.save(state_dict, model_path)
 
         start_time = time.time()
         if args.epochs > 0:
@@ -437,7 +437,7 @@ if __name__ == "__main__":
                 model.load_state_dict(state_dict, strict=False)
                 lm = MultitaskModel(model, tokenizer, model_type, use_cpu_offload=False,
                         lr=args.lr, weight_decay=args.weight_decay, max_length=args.max_length, max_output_length=args.max_output_length, use_wandb=args.use_wandb,
-                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names)
+                        optimizer=args.optimizer, generate_output=args.generate_output, task_names=extended_task_names, eval_clrs=args.eval_last_step)
                 
                 if args.use_3bit or args.use_2bit:
                     trainer.validate_loop.trainer_fn = TrainerFn.FITTING

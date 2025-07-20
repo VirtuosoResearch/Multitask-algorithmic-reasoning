@@ -91,17 +91,25 @@ class add_length:
 
 class convert_format:
 
+    def __init__(self, only_answer_output = False):
+        self.only_answer_output = only_answer_output
+
     def __call__(self, examples):
         examples["input"] = examples["question"][:]
-        examples["output"] = examples["answer"][:]
+        examples["only_answer"] = [answer.split("|")[-1].strip() for answer in examples["answer"]]
+        if self.only_answer_output:
+            examples["output"] = examples["only_answer"]
+        else:
+            examples["output"] = examples["answer"][:]
         return examples
     
 class convert_few_shot_format:
     
-    def __init__(self, train_dataset, k=5, seed=42):
+    def __init__(self, train_dataset, only_answer_output=False, k=5, seed=42):
         self.train_dataset = train_dataset
         self.k = k
         self.rng = np.random.default_rng(seed)
+        self.only_answer_output = only_answer_output
 
     def _concat_examples(self, examples, question):
         output = "".join([example["question"] + example["answer"] for example in examples])
@@ -117,6 +125,9 @@ class convert_few_shot_format:
             few_shot_examples = [self.train_dataset[int(few_shot_example)] for few_shot_example in few_shot_examples]
             examples["input"].append(self._concat_examples(few_shot_examples, examples["question"][i]))
             examples["output"].append(examples["answer"][i])
+        examples["only_answer"] = [answer.split("|")[-1].strip() for answer in examples["answer"]]
+        if self.only_answer_output:
+            examples["output"] = examples["only_answer"]
         return examples
 
 class TextCLRSDataModule(pl.LightningDataModule):
@@ -139,7 +150,8 @@ class TextCLRSDataModule(pl.LightningDataModule):
         minimum_samples_validation=100,
         downsample_seed=0,
         use_few_shot=False,
-        few_shot_k=5
+        few_shot_k=5,
+        only_answer_output=False
     ):
         super().__init__()
 
@@ -165,6 +177,7 @@ class TextCLRSDataModule(pl.LightningDataModule):
         self.minimum_sample_validation = minimum_samples_validation
         self.use_few_shot = use_few_shot
         self.few_shot_k = few_shot_k
+        self.only_answer_output = only_answer_output
 
     def setup(self, stage=None):
         self.task_to_train_datasets = {}
@@ -182,7 +195,7 @@ class TextCLRSDataModule(pl.LightningDataModule):
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
             # convert the input and output format
-            train_dataset = train_dataset.map(convert_format(), batched=True) # remove_columns=column_names
+            train_dataset = train_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True, load_from_cache_file=False) # remove_columns=column_names
             # split dataset
             tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split, seed=42)
             train_dataset = tmp_datasets['train']
@@ -195,9 +208,9 @@ class TextCLRSDataModule(pl.LightningDataModule):
             column_names = predict_dataset.column_names
             # convert the input and output format
             if self.use_few_shot:
-                predict_dataset = predict_dataset.map(convert_few_shot_format(train_dataset, k=self.few_shot_k), batched=True)
+                predict_dataset = predict_dataset.map(convert_few_shot_format(train_dataset, only_answer_output=self.only_answer_output, k=self.few_shot_k), batched=True, load_from_cache_file=False)
             else:
-                predict_dataset = predict_dataset.map(convert_format(), batched=True)
+                predict_dataset = predict_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True, load_from_cache_file=False)
 
             # Downsample the dataset if needed
             if self.downsample_rate < 1.0:
