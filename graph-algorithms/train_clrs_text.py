@@ -371,6 +371,7 @@ if __name__ == "__main__":
         default_root_dir = os.path.join("external_lightning_logs", 
                                         f"{model_key}_" + \
                                         ("_".join(extended_task_names) if len("_".join(extended_task_names)) <= 100 else "{}_tasks".format(len(extended_task_names))) + \
+                                        (f"_use_only_answer_output" if args.only_answer_output else "") + \
                                         (f"_lora_r_{args.lora_rank}" if args.train_lora else "") + \
                                         (f"_{args.save_name}" if args.save_name else "") + \
                                         f"_run_{run}"
