@@ -37,7 +37,7 @@ class MultitaskModel(pl.LightningModule):
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
                 compute_gradients_seed = 0, project_gradients_dim = 200, gradients_dir = "test", 
-                compute_gradients_steps = 1e7, start_step = 0, 
+                compute_gradients_steps = 1e7, start_step = 0, only_compute_outputs = False,
                 evaluate_cot=False, train_invariant_mix=False, eval_math=False, eval_clrs=False):
         """
         - completion_metadata: metaddata used to save completions. If None, completions are not saved.
@@ -70,6 +70,7 @@ class MultitaskModel(pl.LightningModule):
                 self.gradients_dim += param.numel()
         self.project_gradients_dim = project_gradients_dim
         self.compute_gradients_seed = compute_gradients_seed
+        self.only_compute_outputs = only_compute_outputs
         if compute_gradients:
             self.gradients_dir = f"./gradients/{gradients_dir}"
             if not os.path.exists(self.gradients_dir):
@@ -310,24 +311,25 @@ class MultitaskModel(pl.LightningModule):
             outputs[outputs<0.001] += 1e-2            
             outputs = torch.log(outputs/(1-outputs))
             
-            for i in range(len(labels)):
-                start = label_counts[:i].sum() if i > 0 else 0  
-                end = label_counts[:i+1].sum()
-                if end <= start :
-                    print("No gradients to compute for this sample")
-                    continue
-                else:
-                    tmp_outputs = outputs[start:end] # taking the average over the output positions
-                    tmp_gradient = torch.autograd.grad(tmp_outputs.mean(), self.get_trainable_parameters(), retain_graph=True, create_graph=False)
-                    tmp_gradient = torch.cat([gradient.reshape(-1) for gradient in tmp_gradient]).cpu().type(torch.float32).numpy() # flatten gradients
-                    if self.project_matrix is None:
-                        tmp_seed_gradient = tmp_gradient
+            if not self.only_compute_outputs:
+                for i in range(len(labels)):
+                    start = label_counts[:i].sum() if i > 0 else 0  
+                    end = label_counts[:i+1].sum()
+                    if end <= start :
+                        print("No gradients to compute for this sample")
+                        continue
                     else:
-                        tmp_seed_gradient = (tmp_gradient.reshape(1, -1) @ self.project_matrix).flatten()
-                    gradients.append(tmp_seed_gradient)
-                returned_outputs[i] = tmp_outputs.clone().detach().mean().cpu().type(torch.float32).item()
-            gradients = [np.array(gradient) for gradient in gradients]
-            np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_gradients.npy", gradients)
+                        tmp_outputs = outputs[start:end] # taking the average over the output positions
+                        tmp_gradient = torch.autograd.grad(tmp_outputs.mean(), self.get_trainable_parameters(), retain_graph=True, create_graph=False)
+                        tmp_gradient = torch.cat([gradient.reshape(-1) for gradient in tmp_gradient]).cpu().type(torch.float32).numpy() # flatten gradients
+                        if self.project_matrix is None:
+                            tmp_seed_gradient = tmp_gradient
+                        else:
+                            tmp_seed_gradient = (tmp_gradient.reshape(1, -1) @ self.project_matrix).flatten()
+                        gradients.append(tmp_seed_gradient)
+                    returned_outputs[i] = tmp_outputs.clone().detach().mean().cpu().type(torch.float32).item()
+                gradients = [np.array(gradient) for gradient in gradients]
+                np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_gradients.npy", gradients)
             np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_outputs.npy", returned_outputs)
             forward_output['loss'].detach(); logits.detach()
             forward_output['logits'].detach()
