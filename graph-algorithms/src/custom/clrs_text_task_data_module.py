@@ -91,8 +91,9 @@ class add_length:
 
 class convert_format:
 
-    def __init__(self, only_answer_output = False):
+    def __init__(self, only_answer_output = False, sample_steps=20):
         self.only_answer_output = only_answer_output
+        self.sample_steps = sample_steps
 
     def __call__(self, examples):
         examples["input"] = examples["question"][:]
@@ -100,7 +101,13 @@ class convert_format:
         if self.only_answer_output:
             examples["output"] = examples["only_answer"]
         else:
-            examples["output"] = examples["answer"][:]
+            only_answers = [answer.split("|")[-1].strip() for answer in examples["answer"]]
+            intermediate_steps = [answer.split("|")[0].strip().split(",") for answer in examples["answer"]]
+            for i, item in enumerate(intermediate_steps):
+                choices = np.random.choice(len(item), min(len(item), self.sample_steps), replace=False) # if there are too many intermediate steps, randomly sample some of them
+                choices = sorted(choices)
+                intermediate_steps[i] = ", ".join([item[j] for j in choices])
+            examples["output"] = [intermediate_steps[i] + " | " + only_answers[i] for i in range(len(only_answers))]
         return examples
     
 class convert_few_shot_format:
@@ -191,11 +198,13 @@ class TextCLRSDataModule(pl.LightningDataModule):
             train_dataset = load_dataset("tomg-group-umd/CLRS-Text-train")['train']
             train_dataset = train_dataset.filter(lambda x: x['algo_name'] == task_name)
             train_dataset = train_dataset.map(add_length(), batched=True)
-            train_dataset = train_dataset.filter(lambda x: x['length'] in self.train_lengths)
+            train_dataset = train_dataset.filter(lambda x: x['length'] in self.train_lengths) if task_name != "bridges" else \
+                train_dataset.filter(lambda x: x['length'] in [5])
             # fileter out the examples by the text encoder
             column_names = train_dataset.column_names
             # convert the input and output format
-            train_dataset = train_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True, load_from_cache_file=False) # remove_columns=column_names
+            sample_steps = 10 if task_name in ["mst_kruskal", "floyd_warshall"] else 20
+            train_dataset = train_dataset.map(convert_format(only_answer_output=self.only_answer_output, sample_steps=sample_steps), batched=True, load_from_cache_file=False) # remove_columns=column_names
             # split dataset
             tmp_datasets = train_dataset.train_test_split(test_size=self.eval_split, seed=42)
             train_dataset = tmp_datasets['train']
@@ -203,14 +212,15 @@ class TextCLRSDataModule(pl.LightningDataModule):
             
             predict_dataset = load_dataset("tomg-group-umd/CLRS-Text-test")['test_1']
             predict_dataset = predict_dataset.filter(lambda x: x['algo_name'] == task_name)
-            predict_dataset = predict_dataset.filter(lambda x: x['length'] in self.test_lengths)
+            predict_dataset = predict_dataset.filter(lambda x: x['length'] in self.test_lengths) if task_name != "bridges" else \
+                predict_dataset.filter(lambda x: x['length'] in [5])
             # fileter out the examples by the text encoder
             column_names = predict_dataset.column_names
             # convert the input and output format
             if self.use_few_shot:
                 predict_dataset = predict_dataset.map(convert_few_shot_format(train_dataset, only_answer_output=self.only_answer_output, k=self.few_shot_k), batched=True, load_from_cache_file=False)
             else:
-                predict_dataset = predict_dataset.map(convert_format(only_answer_output=self.only_answer_output), batched=True, load_from_cache_file=False)
+                predict_dataset = predict_dataset.map(convert_format(only_answer_output=self.only_answer_output, sample_steps=sample_steps), batched=True, load_from_cache_file=False)
 
             # Downsample the dataset if needed
             if self.downsample_rate < 1.0:
