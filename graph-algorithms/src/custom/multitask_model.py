@@ -37,7 +37,8 @@ class MultitaskModel(pl.LightningModule):
                 # more advanced parameters (set to default if only fine-tuning)
                 use_sample_weights=False, fit_least_square = False, compute_gradients = False,
                 compute_gradients_seed = 0, project_gradients_dim = 200, gradients_dir = "test", 
-                compute_gradients_steps = 1e7, start_step = 0, evaluate_cot=False, train_invariant_mix=False, eval_math=False, eval_clrs=False):
+                compute_gradients_steps = 1e7, start_step = 0, 
+                evaluate_cot=False, train_invariant_mix=False, eval_math=False, eval_clrs=False):
         """
         - completion_metadata: metaddata used to save completions. If None, completions are not saved.
           `epoch_N` is appended to the `train_key` when saving intermediate validation completions.
@@ -60,29 +61,46 @@ class MultitaskModel(pl.LightningModule):
         self.fit_least_square = fit_least_square # Gradient Boosting
 
         self.compute_gradients = compute_gradients
+        self.gradients_dim = 0
+        self.removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings" ]
+        for name, param in model.named_parameters():
+            if any([key in name for key in self.removing_keys]):
+                continue
+            if param.requires_grad:
+                self.gradients_dim += param.numel()
+        self.project_gradients_dim = project_gradients_dim
+        self.compute_gradients_seed = compute_gradients_seed
         if compute_gradients:
-            gradient_dim = 0
-            self.removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings" ]
-            for name, param in model.named_parameters():
-                if any([key in name for key in self.removing_keys]):
-                    continue
-                if param.requires_grad:
-                    gradient_dim += param.numel()
-            print("Creating project matrix with dimensions: ", gradient_dim, project_gradients_dim)
-
-            np.random.seed(compute_gradients_seed)
-            self.project_matrix = (2 * np.random.randint(2, size=(gradient_dim, project_gradients_dim)) - 1).astype(float)
-            self.project_matrix *= 1 / np.sqrt(project_gradients_dim)
-            self.gradient_dir = f"./gradients/{gradients_dir}"
-            if not os.path.exists(self.gradient_dir):
-                os.makedirs(self.gradient_dir)
+            self.gradients_dir = f"./gradients/{gradients_dir}"
+            if not os.path.exists(self.gradients_dir):
+                os.makedirs(self.gradients_dir)
+            for task_name in self.task_names:
+                task_dir = os.path.join(self.gradients_dir, task_name)
+                if not os.path.exists(task_dir):
+                    os.makedirs(task_dir)
+            self.initialize_project_matrix(self.compute_gradients_seed)
+        
         self.param_names = [name for name, param in model.named_parameters() if param.requires_grad]
         self.compute_gradients_steps = compute_gradients_steps
         self.start_step = start_step
+
         self.evaluate_cot = evaluate_cot # For GraphWiz
         self.eval_math = eval_math # For MATH/GSM8K dataset
         self.eval_clrs = eval_clrs # For CLRS dataset
         self.train_invariant_mix = train_invariant_mix
+
+    def initialize_project_matrix(self, seed):
+        """
+        Initialize the project matrix with random values.
+        """
+        print("Creating project matrix with dimensions: ", self.gradients_dim, self.project_gradients_dim, "seed: ", seed)
+        np.random.seed(seed)
+        if self.project_gradients_dim < 0:
+            self.project_matrix = None
+        else:
+            self.project_matrix = (2 * np.random.randint(2, size=(self.gradients_dim, self.project_gradients_dim)) - 1).astype(float)
+            self.project_matrix *= 1 / np.sqrt(self.project_gradients_dim)
+        self.current_project_seed = seed
 
     def get_trainable_parameters(self):
         return [param for name, param in self.model.named_parameters()\
@@ -281,8 +299,7 @@ class MultitaskModel(pl.LightningModule):
 
         # obtain the outputs and gradients of the outputs
         if self.compute_gradients:
-            # TODO: adjust to multiple outputs
-            gradients = []; returned_outputs = np.zeros(labels.shape)
+            gradients = []; returned_outputs = np.zeros(labels.shape[0])
             label_counts = is_label_mask.sum(dim = 1)
             tmp_logits = logits[is_label_mask]
             tmp_probs = torch.softmax(tmp_logits, dim=-1)
@@ -297,18 +314,21 @@ class MultitaskModel(pl.LightningModule):
                 start = label_counts[:i].sum() if i > 0 else 0  
                 end = label_counts[:i+1].sum()
                 if end <= start :
-                    tmp_gradient = np.zeros(self.project_matrix.shape[1])
-                    tmp_outputs = torch.zeros(1)
+                    print("No gradients to compute for this sample")
+                    continue
                 else:
-                    tmp_outputs = outputs[start:end+1]
+                    tmp_outputs = outputs[start:end] # taking the average over the output positions
                     tmp_gradient = torch.autograd.grad(tmp_outputs.mean(), self.get_trainable_parameters(), retain_graph=True, create_graph=False)
                     tmp_gradient = torch.cat([gradient.reshape(-1) for gradient in tmp_gradient]).cpu().type(torch.float32).numpy() # flatten gradients
-                    tmp_gradient = (tmp_gradient.reshape(1, -1) @ self.project_matrix).flatten()
-                gradients.append(tmp_gradient)
-                returned_outputs[i, :tmp_outputs.size(0)] = tmp_outputs.clone().detach().cpu().type(torch.float32).numpy()
-            gradients = np.array(gradients)
-            np.save(f"{self.gradient_dir}/train_batch_{batch_idx}_gradients.npy", gradients)
-            np.save(f"{self.gradient_dir}/train_batch_{batch_idx}_outputs.npy", returned_outputs)
+                    if self.project_matrix is None:
+                        tmp_seed_gradient = tmp_gradient
+                    else:
+                        tmp_seed_gradient = (tmp_gradient.reshape(1, -1) @ self.project_matrix).flatten()
+                    gradients.append(tmp_seed_gradient)
+                returned_outputs[i] = tmp_outputs.clone().detach().mean().cpu().type(torch.float32).item()
+            gradients = [np.array(gradient) for gradient in gradients]
+            np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_gradients.npy", gradients)
+            np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_outputs.npy", returned_outputs)
             forward_output['loss'].detach(); logits.detach()
             forward_output['logits'].detach()
             return {} 
