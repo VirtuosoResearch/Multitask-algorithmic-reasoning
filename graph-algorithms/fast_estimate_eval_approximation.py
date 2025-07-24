@@ -234,7 +234,7 @@ def compute_norm(state_dict, use_lora = True, removing_keys = ["shared", "lm_hea
             norm += val.clone().square().sum().item()
     return np.sqrt(norm)
 
-def generate_state_dict(model, state_dict, coef, device="cpu", removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings", "quant", "absmax"]):
+def generate_state_dict(model, state_dict, coef, device="cpu", removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings" ]):
     new_state_dict = {}; cur_len = 0
     for key, param in model.named_parameters():
         if not param.requires_grad: continue
@@ -243,7 +243,6 @@ def generate_state_dict(model, state_dict, coef, device="cpu", removing_keys = [
             continue
             # new_state_dict[key] = state_dict[key].clone()
         else:
-            assert "lora" in key
             new_state_dict[key] = state_dict[key].clone().to(device) + \
                 torch.Tensor(coef[cur_len:cur_len+param_len].reshape(param.shape)).to(device)
             cur_len += param_len
@@ -419,17 +418,16 @@ if __name__ == "__main__":
                         callbacks=[checkpoint_callback], use_distributed_sampler=False, inference_mode=False
                         )
     # save initial weights
-    if args.train_lora:
-        if not os.path.exists(os.path.join("gradients", gradients_dir)):
-            os.makedirs(os.path.join("gradients", gradients_dir))
-        model_path = os.path.join("gradients", gradients_dir) + "/initial_weights.pt"
-        state_dict = model.state_dict()
-        state_dict = {k: v.clone() for k, v in state_dict.items() if "lora" in k}
-        torch.save(state_dict, model_path)
+    # if args.train_lora:
+    #     if not os.path.exists(os.path.join("gradients", gradients_dir)):
+    #         os.makedirs(os.path.join("gradients", gradients_dir))
+    #     model_path = os.path.join("gradients", gradients_dir) + "/initial_weights.pt"
+    #     state_dict = model.state_dict()
+    #     state_dict = {k: v.clone() for k, v in state_dict.items() if "lora" in k}
+    #     torch.save(state_dict, model_path)
 
-    
     state_dict = {key: val.clone() for key, val in lm.model.state_dict().items() if ("quant" not in key) and ("absmax" not in key)}
-    pretrain_norm = compute_norm(state_dict)
+    pretrain_norm = compute_norm(state_dict, use_lora = False)
     print("Norm of the original model", pretrain_norm)
 
     def fit_linear_model(gradients, outputs=None, labels=None):
@@ -509,12 +507,14 @@ if __name__ == "__main__":
         print("Number of gradients for logistic regression", gradients.shape)
         coef = fit_linear_model(gradients, outputs=outputs)
         coef = coef * scale / np.linalg.norm(coef) 
+        print("L2 norm after scaling", np.linalg.norm(coef))
         
         # evaluate task performances
         new_state_dict = generate_state_dict(lm.model, state_dict, coef, device=lm.model.device)
     
         return new_state_dict, all_gradients, all_outputs
     
+    diff_list = []; inv_project_matrix = np.linalg.pinv(lm.project_matrix) if lm.project_matrix is not None else None
     for i in range(args.number_of_subsets):
         task_idxes = np.random.choice(len(args.task_names), size=int(args.subset_size * len(args.task_names)), replace=False)
         scale = pretrain_norm * args.scale
@@ -524,6 +524,10 @@ if __name__ == "__main__":
         finetuned_state_dict = new_state_dict
         lm.model.load_state_dict(pretrain_state_dict)
         lm.model.load_state_dict(finetuned_state_dict, strict=False)
+
+        finetuned_vector = [finetuned_state_dict[key]-pretrain_state_dict[key] for key in finetuned_state_dict.keys()]
+        finetuned_vector = np.concatenate([vec.flatten().cpu().numpy() for vec in finetuned_vector]).reshape(1,-1)
+        print("Finetuned vector shape", finetuned_vector.shape)
 
         # load compute new outputs
         tmp_task_names = [args.task_names[idx] for idx in task_idxes]
@@ -544,16 +548,29 @@ if __name__ == "__main__":
                 use_few_shot=(args.few_shot_k > 0), 
                 few_shot_k=args.few_shot_k,
                 only_answer_output=args.only_answer_output)
-        new_gradients_dir = gradients_dir + f"_subsets_{tmp_task_names}"
+        new_data_module.setup(stage="fit")
+        tmp_task_names_str = "_".join(tmp_task_names)
+        new_gradients_dir = gradients_dir + f"/subsets/{tmp_task_names_str}"
         if not os.path.exists(f"./gradients/{new_gradients_dir}"):
             os.makedirs(f"./gradients/{new_gradients_dir}")
-        lm.gradients_dir = new_gradients_dir
+            for task_name in tmp_task_names:
+                os.makedirs(f"./gradients/{new_gradients_dir}/{task_name}")
+        lm.gradients_dir = f"./gradients/{new_gradients_dir}"
         _ = trainer.predict(lm, dataloaders=new_data_module.train_dataloader())
 
-        finetuned_outputs = load_outputs(args.compute_gradients_seed, tmp_task_names[0], new_gradients_dir)
+        finetuned_outputs = []
+        for task_name in tmp_task_names:
+            tmp_outputs = load_outputs(args.compute_gradients_seed, task_name, new_gradients_dir)
+            finetuned_outputs.append(tmp_outputs)
+        finetuned_outputs = np.concatenate(finetuned_outputs, axis=0)
+        print(pretrain_outputs)
+        print("pretrain_outputs.shape",pretrain_outputs.shape)
+        print(finetuned_outputs)
+        print("finetuned_outputs.shape",finetuned_outputs.shape)
 
-        finetuned_vector = [finetuned_state_dict[key]-pretrain_state_dict[key] for key in finetuned_state_dict.keys()]
-        finetuned_vector = np.concatenate([vec.flatten().cpu().numpy() for vec in finetuned_vector]).reshape(1,-1)
+        if inv_project_matrix is not None:
+            print(gradients.shape, inv_project_matrix.shape, finetuned_vector.shape)
+            gradients = gradients @ inv_project_matrix
         first_order = (gradients * finetuned_vector).sum(axis=1)
         print("First-order term", first_order)
 
@@ -562,10 +579,10 @@ if __name__ == "__main__":
         mask = np.logical_and(mask, ~np.isnan(finetuned_outputs))
         pretrain_outputs[~mask] = 0 
         finetuned_outputs[~mask] = 0
-        print("pretrain_outputs.shape",pretrain_outputs.shape)
-        print("finetuned_outputs.shape",finetuned_outputs.shape)
 
         diff = np.abs(pretrain_outputs + first_order - finetuned_outputs) / np.maximum(np.abs(finetuned_outputs), np.abs(pretrain_outputs))
         diff = diff[~np.isnan(diff)]
         diffs = np.square(diff).mean()
         print("Mean Difference:", diffs)
+        diff_list.append(diffs)
+    print("Average Difference:", np.mean(diff_list), "std:", np.std(diff_list))

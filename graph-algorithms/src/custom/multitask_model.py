@@ -327,9 +327,19 @@ class MultitaskModel(pl.LightningModule):
                         else:
                             tmp_seed_gradient = (tmp_gradient.reshape(1, -1) @ self.project_matrix).flatten()
                         gradients.append(tmp_seed_gradient)
-                    returned_outputs[i] = tmp_outputs.clone().detach().mean().cpu().type(torch.float32).item()
+                        returned_outputs[i] = tmp_outputs.clone().detach().mean().cpu().type(torch.float32).item()
                 gradients = [np.array(gradient) for gradient in gradients]
                 np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_gradients.npy", gradients)
+            else:
+                for i in range(len(labels)):
+                    start = label_counts[:i].sum() if i > 0 else 0  
+                    end = label_counts[:i+1].sum()
+                    if end <= start :
+                        print("No gradients to compute for this sample")
+                        continue
+                    else:
+                        tmp_outputs = outputs[start:end]
+                        returned_outputs[i] = tmp_outputs.clone().detach().mean().cpu().type(torch.float32).item()
             np.save(f"{self.gradients_dir}/{task_name}/train_batch_{batch_idx}_outputs.npy", returned_outputs)
             forward_output['loss'].detach(); logits.detach()
             forward_output['logits'].detach()

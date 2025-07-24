@@ -234,7 +234,7 @@ def compute_norm(state_dict, use_lora = True, removing_keys = ["shared", "lm_hea
             norm += val.clone().square().sum().item()
     return np.sqrt(norm)
 
-def generate_state_dict(model, state_dict, coef, device="cpu", removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings", "quant", "absmax"]):
+def generate_state_dict(model, state_dict, coef, device="cpu", removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings" ]):
     new_state_dict = {}; cur_len = 0
     for key, param in model.named_parameters():
         if not param.requires_grad: continue
@@ -243,7 +243,6 @@ def generate_state_dict(model, state_dict, coef, device="cpu", removing_keys = [
             continue
             # new_state_dict[key] = state_dict[key].clone()
         else:
-            assert "lora" in key
             new_state_dict[key] = state_dict[key].clone().to(device) + \
                 torch.Tensor(coef[cur_len:cur_len+param_len].reshape(param.shape)).to(device)
             cur_len += param_len
@@ -431,7 +430,7 @@ if __name__ == "__main__":
     
     state_dict = {key: val.clone() for key, val in lm.model.state_dict().items() if ("quant" not in key) and ("absmax" not in key)}
     pretrain_norm = compute_norm(state_dict)
-    print("Norm of the original model", pretrain_norm)
+    print("Norm of the original lora model", pretrain_norm)
 
     def customize_logistic_regression(gradients, outputs=None, labels=None, l2_strength=1e3):
         from scipy.optimize import minimize
