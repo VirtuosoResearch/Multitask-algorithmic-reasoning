@@ -28,6 +28,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import pandas as pd
 from collections import defaultdict
 import time
+import re
 
 from adapters import SeqBnInvConfig, PrefixTuningConfig, BnConfig, DoubleSeqBnConfig, SeqBnConfig
 from adapters import AutoAdapterModel,list_adapters, BnConfig
@@ -48,6 +49,19 @@ def add_result_to_csv(result_datapoint, file_name):
     else:
         result_df = pd.DataFrame(result_datapoint)  
         result_df.to_csv(file_name)   
+
+def layer_index_from_name(name, default=0):
+    _LAYER_PATTERNS = [
+        re.compile(r"(?:^|\.)(layers)\.(\d+)(?:\.|$)"),  # LLaMA-style: ...layers.{idx}....
+        re.compile(r"(?:^|\.)(h)\.(\d+)(?:\.|$)"),       # GPT-2/NeoX-style: ...h.{idx}....
+        re.compile(r"(?:^|\.)(layer)\.(\d+)(?:\.|$)"),   # BERT-style: ...layer.{idx}....
+    ]
+    for pat in _LAYER_PATTERNS:
+        m = pat.search(name)
+        if m:
+            return int(m.group(2))
+    return default
+
 
 def initialize_model(args):
     model_key = args.model_key.replace("/", "-").replace("..", "")
@@ -285,6 +299,8 @@ if __name__ == "__main__":
     parser.add_argument("--runs", type=int, default=3)
 
     parser.add_argument("--load_model_dir", type=str, default="test")
+    parser.add_argument("--load_branching_config", type=str)
+    parser.add_argument("--task_branching_config_dir", type=str)
     parser.add_argument("--write_results", action="store_true")
     parser.add_argument("--use_wandb", action="store_true")
     parser.add_argument("--generate_output", action="store_true")
@@ -374,6 +390,21 @@ if __name__ == "__main__":
                 else:
                     print(model.load_state_dict(torch.load(load_model_dir), strict=False))
                 print(f"Loaded model from {load_model_dir}")
+
+        if args.load_branching_config:
+            # load weights from different trained adapters
+            if args.task_branching_config_dir is not None:
+                task_branching_config_dir = os.path.join("branching_configs", args.task_branching_config_dir)
+                with open(task_branching_config_dir, "r") as f:
+                    for line in f.readlines():
+                        layers, checkpoint_dir = line.split(":")
+                        layers = layers.split(",")
+                        checkpoint = torch.load(load_model_dir)
+                        new_checkpoint = {}
+                        for key, val in checkpoint.items():
+                            if str(layer_index_from_name(key)) in layers:
+                                new_checkpoint[key] = val
+                        model.load_state_dict(new_checkpoint, strict=False)
 
         if not os.path.exists("external_lightning_logs"):
             raise Exception("external_lightning_logs/ does not exist")
