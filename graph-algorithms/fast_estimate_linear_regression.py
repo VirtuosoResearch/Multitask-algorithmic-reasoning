@@ -77,7 +77,16 @@ def initialize_model(args):
         append_eos = False  # t5 tokenizers already append eos
     elif "Qwen" in model_key:
         hf_key = args.model_key.replace("_", "-")
-        model = AutoModelForCausalLM.from_pretrained(hf_key)
+        if args.use_qlora:
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type='nf4'
+                )
+            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) 
+        else:
+            model = AutoModelForCausalLM.from_pretrained(hf_key)
         tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=args.max_length+ args.max_output_length)
         model_type = "decoder"
         append_eos = True
