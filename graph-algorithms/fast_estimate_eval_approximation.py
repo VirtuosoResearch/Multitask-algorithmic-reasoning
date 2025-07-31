@@ -77,7 +77,16 @@ def initialize_model(args):
         append_eos = False  # t5 tokenizers already append eos
     elif "Qwen" in model_key:
         hf_key = args.model_key.replace("_", "-")
-        model = AutoModelForCausalLM.from_pretrained(hf_key)
+        if args.use_qlora:
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_compute_dtype=torch.bfloat16,
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_quant_type='nf4'
+                )
+            model = AutoModelForCausalLM.from_pretrained(hf_key, quantization_config=quantization_config, torch_dtype=torch.bfloat16, device_map={"": args.devices[0]}) 
+        else:
+            model = AutoModelForCausalLM.from_pretrained(hf_key)
         tokenizer = AutoTokenizer.from_pretrained(hf_key, model_max_length=args.max_length+ args.max_output_length)
         model_type = "decoder"
         append_eos = True
@@ -314,7 +323,8 @@ if __name__ == "__main__":
     parser.add_argument("--compute_gradients_seed", type=int, default=0)
     parser.add_argument("--project_gradients_dim", type=int, default=-1)
 
-    parser.add_argument("--number_of_subsets", type=int, default=100)
+    parser.add_argument("--number_of_subsets", type=int, default=1)
+    parser.add_argument("--subset_seed", type=int, default=0)
     parser.add_argument("--subset_size", type=float, default=0.5)
     parser.add_argument("--scale", type=float, default=0.1)
     parser.add_argument("--lr_regularization_lambda", type=float, default=1)
@@ -427,7 +437,7 @@ if __name__ == "__main__":
     #     torch.save(state_dict, model_path)
 
     state_dict = {key: val.clone() for key, val in lm.model.state_dict().items() if ("quant" not in key) and ("absmax" not in key)}
-    pretrain_norm = compute_norm(state_dict, use_lora = False)
+    pretrain_norm = compute_norm(state_dict, use_lora = True)
     print("Norm of the original model", pretrain_norm)
 
     def fit_linear_model(gradients, outputs=None, labels=None):
@@ -516,7 +526,8 @@ if __name__ == "__main__":
     
     diff_list = []; inv_project_matrix = np.linalg.pinv(lm.project_matrix) if lm.project_matrix is not None else None
     for i in range(args.number_of_subsets):
-        task_idxes = np.random.choice(len(args.task_names), size=int(args.subset_size * len(args.task_names)), replace=False)
+        rng = np.random.default_rng(args.subset_seed + i)
+        task_idxes = rng.choice(len(args.task_names), size=int(args.subset_size * len(args.task_names)), replace=False)
         scale = pretrain_norm * args.scale
         new_state_dict, gradients, pretrain_outputs = gradient_based_estimation(task_idxes, scale, seed=args.compute_gradients_seed)
 

@@ -17,6 +17,7 @@ x = [
 79.892578,
 104.7425781,
 66.171875,
+104.7425781,
 49.246875,
 ]
 
@@ -26,6 +27,7 @@ y = [
 84.9,
 85.0,
 86.4,
+85.6,
 87.3,
 ]
 x = np.array(x) # convert to numpy array
@@ -37,6 +39,7 @@ labels = [
           r'$\mathrm{MMoE}$', 
           r'$\mathrm{TAG}$',
           r'$\mathrm{LearningToBranch}$',
+          r'$\mathrm{GradTAG}$',
           r'$\mathrm{AutoBRANE}$',]
 
 # Create scatter plot
@@ -45,14 +48,16 @@ ax.scatter(x[1:-1], y[1:-1], color='orange', s=600)
 ax.scatter(x[-1], y[-1], color='forestgreen', s=600, marker='D')
 # Label each point
 for i, label in enumerate(labels):
+    if i in [6]:
+        ax.text(x[i]+9, y[i]-0.3, label, fontsize=32, ha='left', va='bottom')
     if i in [5]:
         ax.text(x[i]+9, y[i]-0.3, label, fontsize=32, ha='left', va='bottom')
     elif i in [4]:
         ax.text(x[i]+6, y[i]+0.2, label, fontsize=32, ha='left', va='top')
     elif i in [3]:
-        ax.text(x[i]+6, y[i]-0.1, label, fontsize=32, ha='left', va='top')
+        ax.text(x[i]+9, y[i]+0.2, label, fontsize=32, ha='left', va='top')
     elif i in [2]:
-        ax.text(x[i]+5, y[i]+0.1, label, fontsize=32, ha='left', va='bottom')
+        ax.text(x[i]+5, y[i]+0.2, label, fontsize=32, ha='left', va='bottom')
     elif i in [1]:
         ax.text(x[i]+3, y[i]+0.1, label, fontsize=32, ha='left', va='bottom')
     # else:
@@ -60,12 +65,12 @@ for i, label in enumerate(labels):
 
 # set x-axis to log scale
 # plt.xscale('log')
-plt.ylim(12.3, 17.5)
+plt.ylim(12.3, 17)
 plt.yticks([13, 14, 15, 16, 17])
 plt.xticks([0, 25, 50, 75, 100, 125])
-plt.xlim(-10, 160)
+plt.xlim(-10, 165)
 
-# plt.title('Scatter Plot with Labels')
+plt.title(r'$\mathrm{Edge~Transformer}$', fontsize=40)
 plt.xlabel(r'$\mathrm{GPU~Memory~(GB)}$', fontsize=40)
 plt.ylabel(r'$\mathrm{Error~\%}$', fontsize=40)
 ax.tick_params(labelsize=40)
@@ -94,6 +99,7 @@ x = [
 38.17344599,
 38.79354745,
 26.86637231,
+38.79354745,
 18.94110577,
 ]
 
@@ -102,7 +108,8 @@ y = [
 71.6,
 71.7,
 73.1,
-73.7,
+74.0,
+73.5,
 74.6,
 ]
 x = np.array(x) # convert to numpy array
@@ -114,6 +121,7 @@ labels = [
           r'$\mathrm{MMoE}$', 
           r'$\mathrm{TAG}$',
           r'$\mathrm{LearningToBranch}$',
+          r'$\mathrm{GradTAG}$',
           r'$\mathrm{AutoBRANE}$',]
 
 # Create scatter plot
@@ -122,12 +130,14 @@ ax.scatter(x[1:-1], y[1:-1], color='orange', s=600)
 ax.scatter(x[-1], y[-1], color='forestgreen', s=600, marker='D')
 # Label each point
 for i, label in enumerate(labels):
-    if i in [5]:
+    if i in [6]:
         ax.text(x[i]+4, y[i]-0.4, label, fontsize=32, ha='left', va='bottom')
+    if i in [5]:
+        ax.text(x[i]+4, y[i]-0.3, label, fontsize=32, ha='left', va='bottom')
     elif i in [4]:
-        ax.text(x[i]+3, y[i]-0.15, label, fontsize=32, ha='left', va='top')
+        ax.text(x[i]+3, y[i]+0.1, label, fontsize=32, ha='left', va='top')
     elif i in [3]:
-        ax.text(x[i]+3, y[i]-0.1, label, fontsize=32, ha='left', va='top')
+        ax.text(x[i]+3, y[i]+0.3, label, fontsize=32, ha='left', va='top')
     elif i in [2]:
         ax.text(x[i]+3, y[i]+0.1, label, fontsize=32, ha='left', va='bottom')
     elif i in [1]:
@@ -137,12 +147,12 @@ for i, label in enumerate(labels):
 
 # set x-axis to log scale
 # plt.xscale('log')
-plt.ylim(24.5, 29.5)
-plt.yticks([25, 26, 27, 28])
+plt.ylim(25, 29)
+plt.yticks([25, 26, 27, 28, 29])
 plt.xticks([0, 10, 20, 30, 40, 50])
 plt.xlim(-2, 68)
 
-# plt.title('Scatter Plot with Labels')
+plt.title(r'$\mathrm{MPNN}$', fontsize=40)
 plt.xlabel(r'$\mathrm{GPU~Memory~(GB)}$', fontsize=40)
 plt.ylabel(r'$\mathrm{Error~\%}$', fontsize=40)
 ax.tick_params(labelsize=40)
