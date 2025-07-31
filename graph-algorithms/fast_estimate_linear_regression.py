@@ -28,7 +28,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 import pandas as pd
 from collections import defaultdict
 import time
-
+import re
 from adapters import SeqBnInvConfig, PrefixTuningConfig, BnConfig, DoubleSeqBnConfig, SeqBnConfig
 from adapters import AutoAdapterModel,list_adapters, BnConfig
 from torch._inductor.async_compile import AsyncCompile
@@ -49,6 +49,19 @@ def add_result_to_csv(result_datapoint, file_name):
     else:
         result_df = pd.DataFrame(result_datapoint)  
         result_df.to_csv(file_name)   
+
+
+def layer_index_from_name(name, default=0):
+    _LAYER_PATTERNS = [
+        re.compile(r"(?:^|\.)(layers)\.(\d+)(?:\.|$)"),  # LLaMA-style: ...layers.{idx}....
+        re.compile(r"(?:^|\.)(h)\.(\d+)(?:\.|$)"),       # GPT-2/NeoX-style: ...h.{idx}....
+        re.compile(r"(?:^|\.)(layer)\.(\d+)(?:\.|$)"),   # BERT-style: ...layer.{idx}....
+    ]
+    for pat in _LAYER_PATTERNS:
+        m = pat.search(name)
+        if m:
+            return int(m.group(2))
+    return default
 
 def initialize_model(args):
     model_key = args.model_key.replace("/", "-").replace("..", "")
@@ -93,29 +106,29 @@ def initialize_model(args):
     else:
         raise NotImplementedError(args.model_key)
     
-    if args.use_graph_llama:
-        cfg = load_cfg("./src/model/gnn_models/configs/SAGE.yml")
-        specs = np.load(f".//src/model/specs/{args.task_names[0]}_specs.npy", allow_pickle=True).item()
+    # if args.use_graph_llama:
+    #     cfg = load_cfg("./src/model/gnn_models/configs/SAGE.yml")
+    #     specs = np.load(f".//src/model/specs/{args.task_names[0]}_specs.npy", allow_pickle=True).item()
 
-        model.get_model().initialize_graph_modules(
-            graph_tower="SAGE",
-            specs=specs, cfg=cfg, use_cross_attn=args.use_cross_attn, 
-            add_output_projection=args.add_output_projection,
-            alignment_loss_weight=args.alignment_loss_weight,
-            test_classifier_before_cross_attn=args.test_classifier_before_cross_attn
-        )
-        model.requires_grad_(False)
-        # only the graph tower is trainable
-        if not args.freeze_graph_tower:
-            for p in model.get_model().get_graph_tower().parameters():
-                p.requires_grad = True
-        for p in model.get_model().graph_projector.parameters():
-            p.requires_grad = True
-        if args.use_cross_attn:
-            for p in model.get_model().graph_token_cross_attn.parameters():
-                p.requires_grad = True
+    #     model.get_model().initialize_graph_modules(
+    #         graph_tower="SAGE",
+    #         specs=specs, cfg=cfg, use_cross_attn=args.use_cross_attn, 
+    #         add_output_projection=args.add_output_projection,
+    #         alignment_loss_weight=args.alignment_loss_weight,
+    #         test_classifier_before_cross_attn=args.test_classifier_before_cross_attn
+    #     )
+    #     model.requires_grad_(False)
+    #     # only the graph tower is trainable
+    #     if not args.freeze_graph_tower:
+    #         for p in model.get_model().get_graph_tower().parameters():
+    #             p.requires_grad = True
+    #     for p in model.get_model().graph_projector.parameters():
+    #         p.requires_grad = True
+    #     if args.use_cross_attn:
+    #         for p in model.get_model().graph_token_cross_attn.parameters():
+    #             p.requires_grad = True
 
-        model.set_if_only_train_graph(args.only_train_graph)
+    #     model.set_if_only_train_graph(args.only_train_graph)
 
     if args.train_adapter:
         
@@ -222,13 +235,17 @@ def initialize_model(args):
                 for p in model.model.get_model().graph_token_cross_attn.parameters():
                     p.requires_grad = True
 
+        if args.freeze_layers > 1:
+            for name, param in model.named_parameters():
+                if layer_index_from_name(name) < args.freeze_layers:
+                    param.requires_grad = False
+
         model.print_trainable_parameters()
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
     return model, tokenizer, hf_key, model_type, append_eos
-
 
 
 def compute_norm(state_dict, use_lora = True, removing_keys = ["shared", "lm_head", "wte", "wpe", "ln", "embed_tokens", "norm", "word_embeddings", "quant", "absmax"]):
@@ -318,15 +335,15 @@ if __name__ == "__main__":
     parser.add_argument("--generate_output", action="store_true")
 
     # compute gradient arguments
-    parser.add_argument("--start_step", type=int, default=0)
-    parser.add_argument("--compute_gradient_steps", type=int, default=1e7)
-    parser.add_argument("--compute_gradients_seed", type=int, default=0)
-    parser.add_argument("--project_gradients_dim", type=int, default=-1)
-
     parser.add_argument("--number_of_subsets", type=int, default=100)
     parser.add_argument("--subset_size", type=float, default=0.5)
     parser.add_argument("--lr_customize", action="store_true")
     parser.add_argument("--lr_regularization_lambda", type=float, default=1)
+    parser.add_argument("--freeze_layers", type=int, default=0)
+    parser.add_argument("--start_step", type=int, default=0)
+    parser.add_argument("--compute_gradient_steps", type=int, default=1e7)
+    parser.add_argument("--compute_gradients_seed", type=int, default=0)
+    parser.add_argument("--project_gradients_dim", type=int, default=-1)
 
     args = parser.parse_args()
     args.enable_checkpointing = not args.disable_checkpointing
