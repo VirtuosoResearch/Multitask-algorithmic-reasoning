@@ -6,5 +6,5 @@ ds = SALSACLRSDataset(root=DATA_DIR, split="train", algorithm="bfs", num_samples
 
 ## Run code
 ```bash
-python baselines/run_experiment.py --cfg baselines/configs/dijkstra/GINE.yml --seed 42 --data-dir path/to/data/store --enable-wandb --hints
+python baselines/run_experiment.py --cfg [baselines/configs/bfs/GIN.yml] --seed 42 --data-dir [data/] --hints --enable-wandb --size [5000] --node [16] --algorithm [bfs]
 ```
