@@ -21,6 +21,7 @@ from core.utils import NaNException
 from salsaclrs import SALSACLRSDataModule, load_dataset
 from salsaclrs import SALSACLRSDataset
 
+
 logger.remove()
 logger.add(sys.stderr, level="INFO")
 
@@ -137,7 +138,10 @@ if __name__ == '__main__':
 
     # load datasets
     #train_ds, val_ds, test_ds = load_ds(cfg, os.path.join(DATA_DIR, "datasets"))
-    train_ds = SALSACLRSDataset(root=DATA_DIR, split="train", algorithm=args.algorithm, num_samples=args.size, graph_generator="er", graph_generator_kwargs={"n": [args.node, args.node], "p_range": (0.1, 0.3)}, hints=True)
+    COMMON_CACHE_DIR = "./shared_graph_cache"
+    train_ds = SALSACLRSDataset(root=DATA_DIR, split="train", algorithm=args.algorithm, num_samples=args.size, graph_generator="er", graph_generator_kwargs={"n": [args.node, args.node], "p_range": (0.1, 0.3)}, hints=True, graph_batch_dir=COMMON_CACHE_DIR)
+    print(train_ds[0].edge_index)
+    print(asd)
     test_ds = SALSACLRSDataset(root=DATA_DIR, split="test", algorithm=args.algorithm, num_samples=512, graph_generator="er", graph_generator_kwargs={"n": [args.node, args.node], "p_range": (0.1, 0.3)}, hints=True)
     val_ds = SALSACLRSDataset(root=DATA_DIR, split="val", algorithm=args.algorithm, num_samples=512, graph_generator="er", graph_generator_kwargs={"n": [args.node, args.node], "p_range": (0.1, 0.3)}, hints=True)
     specs = train_ds.specs
