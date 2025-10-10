@@ -16,6 +16,7 @@ import tensorflow as tf
 import wandb
 import pickle
 import haiku as hk
+import pandas as pd
 
 import time
 from clrs import utils
@@ -603,6 +604,20 @@ def main(unused_argv):
   matrix_P = (2 * np.random.randint(2, size=(gradient_dim, project_dim)) - 1).astype(np.float32)
   matrix_P *= 1 / np.sqrt(project_dim)
       
+  # Initialize CSV file for results
+  results_dir = './results'
+  if not os.path.exists(results_dir):
+    os.makedirs(results_dir)
+  
+  csv_filename = os.path.join(results_dir, 
+    f'processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_'
+    f'seed_{FLAGS.gradient_projection_seed}_projection_dim_{FLAGS.projection_dim}_'
+    f'subset_{FLAGS.num_subsets}_subset_size_{FLAGS.num_subset_size}.csv')
+
+  # Initialize the CSV file with headers
+  csv_headers = ['subset_id', 'target_algorithm', 'training_algorithms', 'split', 'metric', 'value']
+  pd.DataFrame(columns=csv_headers).to_csv(csv_filename, index=False)
+
   # collect gradients
   all_subset_results = [] 
   for subset in range(FLAGS.num_subsets):
@@ -652,11 +667,32 @@ def main(unused_argv):
       logging.info('(test) algo %s: %s', FLAGS.algorithms[algo_idx], test_stats)
       eval_results.update({f"test_algo_{FLAGS.algorithms[algo_idx]}_{key}": val for key, val in val_stats.items()})
 
+    # Convert evaluation results to DataFrame rows
+    rows = []
+    for algo in algorithms:
+      # Get all metrics for this algorithm
+      for split in ['val', 'test']:
+        for key, value in eval_results.items():
+          if key.startswith(f"{split}_algo_{algo}_"):
+            metric = key.split(f"{split}_algo_{algo}_")[1]
+            rows.append({
+              'subset_id': subset,
+              'target_algorithm': algo,
+              'training_algorithms': ','.join(algorithms),
+              'split': split,
+              'metric': metric,
+              'value': value
+            })
+    
+    # Append rows to CSV file
+    pd.DataFrame(rows).to_csv(csv_filename, mode='a', header=False, index=False)
+    
+    # Also keep the traditional pickle save for backward compatibility
     all_subset_results.append(eval_results)
-    # save results at every step 
-    with open(f"./results/processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_" \
-              + "seed_{}_projection_dim_{}_".format(FLAGS.gradient_projection_seed, FLAGS.projection_dim) \
-              + "subset_{}_subset_size_{}".format(FLAGS.num_subsets, FLAGS.num_subset_size) + ".pkl", 'wb') as f:
+    with open(os.path.join(results_dir, 
+              f'processor_{FLAGS.processor_type}_layers_{FLAGS.num_layers}_dim_{FLAGS.hidden_size}_'
+              f'seed_{FLAGS.gradient_projection_seed}_projection_dim_{FLAGS.projection_dim}_'
+              f'subset_{FLAGS.num_subsets}_subset_size_{FLAGS.num_subset_size}.pkl'), 'wb') as f:
       pickle.dump(all_subset_results, f)
   
   logging.info('Done!')
