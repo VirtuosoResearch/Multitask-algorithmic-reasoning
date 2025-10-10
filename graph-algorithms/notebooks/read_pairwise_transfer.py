@@ -2,17 +2,21 @@
 import pandas as pd
 import numpy as np
 
+# task_list = [
+#     'edge_existence', 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check',
+#     'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
+# ]
+# task_list = [ f"{task}_zero_shot" for task in task_list ]
+
 task_list = [
-    'edge_existence', 'node_degree', 'node_count', 'edge_count', 'connected_nodes', 'cycle_check',
-    'disconnected_nodes', 'reachability', 'shortest_path', 'maximum_flow', 'triangle_counting', 'node_classification'
+    "bfs", "dfs", "topological_sort", "articulation_points", "bridges", "strongly_connected_components", "mst_kruskal", "mst_prim", "dijkstra", "bellman_ford", 'dag_shortest_paths', "floyd_warshall"
 ]
-task_list = [ f"{task}_zero_shot" for task in task_list ]
 
-df = pd.read_csv('./results/meta-llama-Llama-3.2-1B_pariwise_lora_r_16/results.csv', index_col=0)
+df = pd.read_csv('../results/Qwen-Qwen2.5-1.5B_clrs_pair_lora_r_16/results.csv', index_col=0)
 
-stl_results = [
-    98.0000, 99.5000, 100.0000, 70.0000, 100.0000, 99.8000, 84.7783, 97.6000, 86.2000, 47.2000,	60.2000, 97.9000
-]
+# stl_results = [
+#     98.0000, 99.5000, 100.0000, 70.0000, 100.0000, 99.8000, 84.7783, 97.6000, 86.2000, 47.2000,	60.2000, 97.9000
+# ]
 pairwise_results = np.zeros((12, 12))
 
 for i, task in enumerate(task_list):
@@ -21,12 +25,18 @@ for i, task in enumerate(task_list):
         continue
     for j, task2 in enumerate(task_list):
         if i == j:
-            pairwise_results[i, j] = 0
+            if len(tmp_df[tmp_df['Trained with'] == "{}".format(task)]) > 0:
+                pairwise_results[i, j] = tmp_df[tmp_df['Trained with'] == "{}".format(task)]['test_accuracy'].values[0]
         else:
             if len(tmp_df[tmp_df['Trained with'] == "{} {}".format(task, task2)]) > 0:
-                pairwise_results[i, j] = tmp_df[tmp_df['Trained with'] == "{} {}".format(task, task2)]['accuracy'].values[0]-stl_results[i]
+                pairwise_results[i, j] = tmp_df[tmp_df['Trained with'] == "{} {}".format(task, task2)]['test_accuracy'].values[0]
             elif len(tmp_df[tmp_df['Trained with'] == "{} {}".format(task2, task)]) > 0:
-                pairwise_results[i, j] = tmp_df[tmp_df['Trained with'] == "{} {}".format(task2, task)]['accuracy'].values[0]-stl_results[i]
+                pairwise_results[i, j] = tmp_df[tmp_df['Trained with'] == "{} {}".format(task2, task)]['test_accuracy'].values[0]
+
+# %%
+for i in range(len(pairwise_results)):
+    tmp_results = pairwise_results[i]
+    tmp_results[tmp_results==0] = tmp_results[tmp_results!=0].mean() 
 
 # %%
 for i, task_name in enumerate(task_list):
@@ -145,7 +155,7 @@ def run_sdp_clustering(task_affinities, k):
         final_assignments.append(assignment[cluster_idx])
     return final_assignments
 
-n_clusters = 3
+n_clusters = 6
 final_assignments = run_sdp_clustering(pairwise_results, n_clusters)
 
 for assignment in final_assignments:

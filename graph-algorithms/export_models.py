@@ -3,7 +3,7 @@ import os
 import torch
 from lightning_fabric.utilities.cloud_io import _load as pl_load
 
-load_model_dir = "Qwen-Qwen2.5-1.5B_12_tasks_lora_r_16_clrs_all_algorithms_run_0/epoch_epoch=7.ckpt"
+load_model_dir = "Qwen-Qwen2.5-14B_12_tasks_lora_r_16_clrs_all_algorithms_run_0/epoch_epoch=6.ckpt"
 load_model_dir = os.path.join("external_lightning_logs", load_model_dir)
 save_model_dir = load_model_dir.replace(".ckpt", ".pt")
 

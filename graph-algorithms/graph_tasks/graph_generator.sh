@@ -26,9 +26,9 @@ OUTPUT_PATH="./data/graphs"
 
 echo "The output path is set to: $OUTPUT_PATH"
 
-# for node in 20 # 40 60 80
+# for node in 15 20 # 40 60 80
 # do
-# for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path" #  
+# for algorithm in "ba" "sbm" "sfn" # "complete" "star" "path" #  "er" #
 # do
 #   echo "Generating test examples for $algorithm"
 #   python3 -m graph_tasks.graph_generator \
@@ -39,7 +39,7 @@ echo "The output path is set to: $OUTPUT_PATH"
 #                     --min_nodes $node --max_nodes $((node+1))
 # done
 
-# for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path" # 
+# for algorithm in "ba" "sbm" "sfn" # "complete" "star" "path" # 
 # do
 #   echo "Generating test examples for $algorithm"
 #   python3 -m graph_tasks.graph_generator \
@@ -51,7 +51,7 @@ echo "The output path is set to: $OUTPUT_PATH"
 # done
 
 
-# for algorithm in "er" # "ba" "sbm" "sfn" "complete" "star" "path" # 
+# for algorithm in "ba" "sbm" "sfn" # "complete" "star" "path" # 
 # do
 #   echo "Generating test examples for $algorithm"
 #   python3 -m graph_tasks.graph_generator \
@@ -78,7 +78,7 @@ echo "The output path is set to: $TASK_DIR"
 
 for node in 15 20 # 40 60 80
 do
-for ALGORITHM in "er" # "ba" "sbm" "sfn" "star" "path" "complete"
+for ALGORITHM in "ba" "sbm" "sfn" # "star" "path" "complete"
 do
 for  task in "${TASKS[@]}"
 do
@@ -95,7 +95,7 @@ done
 done
 
 
-for ALGORITHM in "er" # "ba" "sbm" "sfn" "star" "path" "complete"
+for ALGORITHM in "ba" "sbm" "sfn" # "star" "path" "complete"
 do
 for  task in "${TASKS[@]}"
 do
@@ -111,7 +111,7 @@ do
 done
 done
 
-for ALGORITHM in "er" # "ba" "sbm" "sfn" "star" "path" "complete"
+for ALGORITHM in "ba" "sbm" "sfn" # "star" "path" "complete"
 do
 for  task in "${TASKS[@]}"
 do
