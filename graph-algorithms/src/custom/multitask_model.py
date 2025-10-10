@@ -227,7 +227,7 @@ class MultitaskModel(pl.LightningModule):
                     self.tokenizer.padding_side = 'right'
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-                    output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length, max_new_tokens=self.max_output_length,
+                    output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_new_tokens=self.max_output_length,
                                                 pad_token_id=self.tokenizer.pad_token_id,
                                                 eos_token_id=self.tokenizer.eos_token_id).detach()
                 else:
@@ -237,7 +237,7 @@ class MultitaskModel(pl.LightningModule):
                     inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
                     self.tokenizer.padding_side = 'right'
                     inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
-                    output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,max_new_tokens=self.max_output_length,
+                    output = self.model.generate(**inputs, max_new_tokens=self.max_output_length,
                                                 pad_token_id=self.tokenizer.pad_token_id,
                                                 eos_token_id=self.tokenizer.eos_token_id,
                                                 do_sample=True, temperature=0.8
@@ -374,7 +374,7 @@ class MultitaskModel(pl.LightningModule):
                 self.tokenizer.padding_side = 'right'
                 inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
 
-                output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_length=self.max_length+self.max_output_length,max_new_tokens=self.max_output_length,
+                output = self.model.generate(**inputs, graph_data=batch["graph_data"], max_new_tokens=self.max_output_length,
                                             pad_token_id=self.tokenizer.pad_token_id,
                                             eos_token_id=self.tokenizer.eos_token_id).detach()
             else:
@@ -384,7 +384,7 @@ class MultitaskModel(pl.LightningModule):
                 inputs = self.tokenizer(inputs, return_tensors="pt", padding=True, truncation=True)
                 self.tokenizer.padding_side = 'right'
                 inputs = self.transfer_batch_to_device(inputs, self.device, batch_idx)
-                output = self.model.generate(**inputs, max_length=self.max_length+self.max_output_length,max_new_tokens=self.max_output_length,
+                output = self.model.generate(**inputs, max_new_tokens=self.max_output_length,
                                             pad_token_id=self.tokenizer.pad_token_id,
                                             eos_token_id=self.tokenizer.eos_token_id,
                                             do_sample=True, temperature=0.8).detach()

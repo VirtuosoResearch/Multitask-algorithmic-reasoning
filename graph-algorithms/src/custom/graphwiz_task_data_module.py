@@ -79,15 +79,27 @@ class CasualLMInstructionCollator:
 
 class convert_format:
 
+    prompt_no_input = (
+      "Below is an instruction that describes a task. "
+        f"Write a response that appropriately completes the request step by step.\n\n"
+        "### Instruction:\n{query}\n\n### Response:"
+    )
+
     def __call__(self, examples):
-        examples["input"] = examples["query"][:]
+        examples["input"] = [self.prompt_no_input.format(query=q) for q in examples["query"][:]]
         examples["output"] = examples["answer"][:]
         return examples
 
 class convert_format_test:
 
+    prompt_no_input = (
+      "Below is an instruction that describes a task. "
+        f"Write a response that appropriately completes the request step by step.\n\n"
+        "### Instruction:\n{query}\n\n### Response:"
+    )
+
     def __call__(self, examples):
-        examples["input"] = examples["input_prompt"][:]
+        examples["input"] = [self.prompt_no_input.format(query=q) for q in examples["input_prompt"][:]]
         examples["output"] = examples["answer"][:]
         return examples
     
@@ -169,7 +181,7 @@ class GraphWizDataModule(pl.LightningDataModule):
             train_dataset = train_dataset.map(convert_format(), batched=True) # remove_columns=column_names
 
             predict_dataset = load_dataset("GraphWiz/GraphInstruct-Test", task_name)['test']
-            predict_dataset = predict_dataset.filter(lambda x: len(x['input_prompt']) <= self.max_input_length*2)
+            # predict_dataset = predict_dataset.filter(lambda x: len(x['input_prompt']) <= self.max_input_length*2)
             predict_dataset = predict_dataset.map(convert_format_test(), batched=True)
 
             # split dataset

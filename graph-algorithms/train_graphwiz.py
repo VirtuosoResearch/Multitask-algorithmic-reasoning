@@ -50,7 +50,7 @@ def add_result_to_csv(result_datapoint, file_name):
 def initialize_model(args):
     model_key = args.model_key.replace("/", "-").replace("..", "")
     if "gpt" in args.model_key or "Llama" in model_key \
-        or "bloomz" in model_key or "gemma" in model_key or "Mistral" in model_key:
+        or "bloomz" in model_key or "gemma" in model_key or "Mistral" in model_key or "GraphWiz" in model_key:
         hf_key = args.model_key.replace("_", "-")
         tokenizer = AutoTokenizer.from_pretrained(hf_key)
         tokenizer.padding_side = 'right'
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--task_names", type=str, nargs="+", default=['dfs']) 
     # parser.add_argument("--prompt_styles", type=str, nargs="+", default=['zero_shot']) 
     
-    parser.add_argument("--model_key", type=str, default="gpt2")
+    parser.add_argument("--model_key", type=str, default="GraphWiz/LLaMA2-7B-DPO")
     parser.add_argument("--batch_size", type=int, default=8)
     parser.add_argument("--inference_batch_size", type=int, default=None)
     parser.add_argument("--devices", type=int, nargs="+", default=[0, 1])
