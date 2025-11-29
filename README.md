@@ -112,7 +112,7 @@ pip install -r requirements.txt
 
 ### Supported Tasks
 
-Text versions of CLRS algorithms:
+Tasks in text versions of the CLRS benchmark:
 - Graph algorithms: `bfs`, `dfs`, `topological_sort`, `articulation_points`, `bridges`, `strongly_connected_components`
 - Shortest path: `dijkstra`, `bellman_ford`, `dag_shortest_paths`, `floyd_warshall`
 - Minimum spanning tree: `mst_kruskal`, `mst_prim`
@@ -120,46 +120,25 @@ Text versions of CLRS algorithms:
 GraphWiz Tasks
 - `connectivity`, `bipartite`, `cycle`, `flow`, `hamilton`, `shortest`, `substructure`, `topology`, `triangle`
 
-GraphQA: Graph question answering tasks
+GraphQA Tasks 
+- `edge_existence`, `node_degree`, `node_count`, `edge_count`, `connected_nodes`, `cycle_check`, `disconnected_nodes`, `reachability`, `shortest_path`, `maximum_flow`, `triangle_counting`, `node_classification`
+- Follow instructions in `graph_tasks` to generate task data
 
 ### Training
 
 
-Train on CLRS Text Tasks:
-```bash
-python train_clrs_text.py \
-  --task_names "bfs" \
-  --model_key "meta-llama/Llama-3.1-1B" \
-  --devices 0 \
-  --batch_size 4 \
-  --max_epochs 10
-```
+For Text-CLRS datasets, use `train_clrs_text.py`
 
-Train on GraphWiz dataset:
-```bash
-python train_graphwiz.py \
-  --task_names "connectivity" "shortest" "topology" \
-  --model_key "meta-llama/Llama-3.1-1B" \
-  --devices 0 \
-  --batch_size 4 \
-  --max_epochs 5
-```
+For GraphWiz datasets, use `train_graphwiz.py`
 
-Train on GraphQA tasks:
-```bash
-python train_graphqa.py \
-  --task_names "graph_qa" \
-  --model_key "meta-llama/Llama-2-7b-hf" \
-  --devices 0
-```
+For GraphQA datasets, use `train_graphqa.py`
 
 The codebase supports various LLM architectures:
-- **LLaMA family**: `meta-llama/Llama-2-7b-hf`, `meta-llama/Llama-2-13b-hf`, `meta-llama/Meta-Llama-3-8B`
+- **LLaMA family**: `meta-llama/Llama-2-7b-hf`, `meta-llama/Llama-2-13b-hf`, `meta-llama/Meta-Llama-3-8B`, `meta-llama/Meta-Llama-3-1B`
 - **Mistral**: `mistralai/Mistral-7B-v0.1`
 - **Qwen**: `Qwen/Qwen-7B`, `Qwen/Qwen2-7B`
 
 Common parameters for training scripts:
-
 - `--task_names`: List of tasks to train on
 - `--model_key`: HuggingFace model identifier
 - `--devices`: GPU device IDs to use
@@ -181,7 +160,7 @@ Both projects require:
 
 ## Citation
 
-If you find this repository useful or happen to use it in a research paper, please cite our work with the following bib information.
+If you find this repository useful or happen to use it in a research paper, please cite our work with the following BibTeX information.
 
 ```
 @article{li2026efficiently,
