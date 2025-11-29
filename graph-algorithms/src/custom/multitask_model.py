@@ -14,6 +14,7 @@ from sklearn.metrics import accuracy_score, f1_score
 from src.utils.compute_metrics import compute_accuracy
 from pynvml import *
 from src.utils.math_utils import eval_results_math, eval_results_gsm8k
+import re
 
 def print_gpu_utilization():
     nvmlInit()
@@ -27,6 +28,70 @@ def print_gpu_utilization():
 TODO:
 - Modify compute gradients
 '''
+
+def extract_last_num(text: str) -> float:
+    text = re.sub(r"(\d),(\d)", "\g<1>\g<2>", text)  # 处理形如 123,456
+    res = re.findall(r"(\d+(\.\d+)?)", text)  # 匹配 123456.789
+    if len(res) > 0:
+        num_str = res[-1][0]
+        return float(num_str)
+    else:
+        return 0.0
+    
+    
+def check(key, truth, predict):
+    
+    if key in ['cycle', 'connectivity', 'hamilton', 'substructure', 'bipartite']:
+        if '###' in predict:
+            if 'yes' in truth.lower() and 'yes' in predict.split('###')[-1].lower():
+                # correct_samples[key].append(v)
+                return True
+            elif 'no' in truth.lower() and 'no' in predict.split('###')[-1].lower():
+                return True
+            return False
+        else:
+            matches = re.findall(r'\b(yes|no)\b', predict, flags=re.IGNORECASE)
+            if matches:
+                last_match = matches[-1].lower()
+                if last_match == 'yes' and 'yes' in truth.lower():
+                    return True
+                elif last_match == 'no' and 'no' in truth.lower():
+                    return True
+            else:
+                return False
+    elif key in ['flow', 'shortest', 'triangle', 'triplet']:
+      
+        t_num = extract_last_num(truth)
+        p_num = extract_last_num(predict.split('###')[-1])
+        if abs(t_num - p_num) < 1e-2:
+            return True
+        return False
+                
+    elif key == 'topology':
+        
+        # elif key == 'topology':
+        
+        if '###' in predict:
+            pre = predict.split('###')[-1].strip(' ')
+            truth = truth.split('###')[-1].strip(' ')
+            if truth in pre or pre in truth:
+                return True
+            return False
+        else:
+            truth = truth.split('###')[-1].split(',')
+            for t in truth:
+                if t in predict or t.strip(' ') in predict:
+                    return True
+            return False
+
+def compute_graphwiz_accuracy(task_name, pred_answers, gold_answers):
+    correct = 0
+    total = 0
+    for (pred, gold) in zip(pred_answers, gold_answers):
+        if check(task_name, gold, pred):
+            correct += 1
+        total += 1
+    return {"accuracy": 100 * (correct / total if total > 0 else 0), "edit_distance": -1}
 
 class MultitaskModel(pl.LightningModule):
     validation_predictions: Dict
@@ -240,7 +305,7 @@ class MultitaskModel(pl.LightningModule):
                     output = self.model.generate(**inputs, max_new_tokens=self.max_output_length,
                                                 pad_token_id=self.tokenizer.pad_token_id,
                                                 eos_token_id=self.tokenizer.eos_token_id,
-                                                do_sample=True, temperature=0.8
+                                                do_sample=True, temperature=1.0
                                                 ).detach()
                 input_len = inputs["input_ids"].shape[1]
                 output[:, :input_len] = self.tokenizer.pad_token_id
@@ -387,7 +452,7 @@ class MultitaskModel(pl.LightningModule):
                 output = self.model.generate(**inputs, max_new_tokens=self.max_output_length,
                                             pad_token_id=self.tokenizer.pad_token_id,
                                             eos_token_id=self.tokenizer.eos_token_id,
-                                            do_sample=True, temperature=0.8).detach()
+                                            do_sample=True, temperature=1.0).detach()
             input_len = inputs["input_ids"].shape[1]
             output[:, :input_len] = self.tokenizer.pad_token_id
             if not self.evaluate_cot:
@@ -486,8 +551,11 @@ class MultitaskModel(pl.LightningModule):
                         else:
                             gold_answers[i] = answer
                 
-                gold_answers = [[answer] for answer in gold_answers]
-                metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
+                if self.evaluate_cot:
+                    metrics = compute_graphwiz_accuracy(task_name, pred_answers, gold_answers)
+                else:
+                    gold_answers = [[answer] for answer in gold_answers]
+                    metrics = compute_accuracy(pred_answers, gold_answers, indices=batch.get("indexes", None))
                 summary[f"{task_name}_accuracy"] += metrics["accuracy"]*len(batch["answers"])
                 summary[f"{task_name}_edit_distance"] += metrics["edit_distance"]*len(batch["answers"])
             

@@ -30,6 +30,7 @@ import time
 from adapters import SeqBnInvConfig, PrefixTuningConfig, BnConfig, DoubleSeqBnConfig, SeqBnConfig
 from adapters import AutoAdapterModel,list_adapters, BnConfig
 from torch._inductor.async_compile import AsyncCompile
+import re
 
 logging.basicConfig(level=logging.INFO, force=True)
 torch.set_float32_matmul_precision("high")
@@ -289,7 +290,7 @@ if __name__ == "__main__":
                             default_root_dir=default_root_dir, min_epochs=args.epochs, max_epochs=args.epochs,
                             accumulate_grad_batches=args.accumulate, precision=args.precision,
                             enable_checkpointing=args.enable_checkpointing,
-                            callbacks=[checkpoint_callback], check_val_every_n_epoch=3
+                            callbacks=[checkpoint_callback], check_val_every_n_epoch=1
                             )
         # save initial weights
         if args.train_lora:

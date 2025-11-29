@@ -49,7 +49,7 @@ def check(key, truth, predict):
                     return True
             else:
                 return False
-    elif key in ['flow', 'shortest', 'triplet']:
+    elif key in ['flow', 'shortest', 'triangle', 'triplet']:
       
         t_num = extract_last_num(truth)
         p_num = extract_last_num(predict.split('###')[-1])
@@ -189,7 +189,7 @@ batch_llama = get_batch_llama(model, tokenizer, args)
 pure_model = model_path.split('/')[-1]
 Path(save_dir).mkdir(parents=True, exist_ok=True)
 
-tasks = ['cycle', 'connectivity', 'hamilton', 'substructure', 'bipartite', 'flow', 'shortest', 'triplet', 'topology']
+tasks = ['shortest', 'topology', 'triangle', 'flow', 'hamilton', 'substructure', 'cycle', 'connectivity', 'bipartite']
 
 sources = []
 targets = []
