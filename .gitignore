@@ -18,5 +18,6 @@ MetaMath/
 gradients/
 Graph-Reasoning-LLM/
 clrs/
+!clrs_experiments/clrs/
 saved/
 deprecated_/
