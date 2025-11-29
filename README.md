@@ -32,7 +32,7 @@ pip install -e .
 ```
 
 
-#### Basic Training
+#### Training
 
 Train a single algorithm (e.g., Dijkstra):
 ```bash
@@ -55,6 +55,16 @@ python -m clrs.examples.run \
   --projection_dim 16
 ```
 
+Train a branching multitask network
+```bash
+CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python -m clrs.examples.run \
+    --algorithms "bfs","dfs","topological_sort","articulation_points","bridges","strongly_connected_components","mst_kruskal","mst_prim","dijkstra","bellman_ford",'dag_shortest_paths',"floyd_warshall"\
+    --use_branching_structure --branching_structure_dir "tree_structure" --processor_type branching_edge_t \
+    --num_layers 5 \
+    --runs 3 \
+    --train_steps 10000 
+```
+
 Available processor types:
 - `gat`: Graph Attention Network
 - `edge_t`: Edge Transformer
@@ -64,14 +74,6 @@ Available processor types:
 - `branching_mpnn`: Branching MPNN networks
 - `branching_gat` & `branching_gatv2`: Branching GAT networks
 
-#### Multitask Training
-
-Train on sampled task subsets:
-```bash
-python train_sampled_tasks.py
-```
-
-This script automatically samples different combinations of algorithms and runs multitask training.
 - **clrs/examples/run.py**: Main training script for CLRS algorithms
 - **train_sampled_tasks.py**: Multi-task training with random algorithm subsets
 - **branchnn_search.py**: Branch neural network search for task grouping
