@@ -1,14 +1,15 @@
 # Multitask Algorithmic Reasoning
 
-This repository contains code for multitask algorithmic reasoning experiments on the CLRS benchmark and text-based graph tasks.
+This repository contains code for multitask algorithmic reasoning experiments on the CLRS benchmark and text-based graph tasks. We propose branching neural networks for multitask algorithmic reasoning by dividing algorithms into separate branches. This can be
+applied on top of base models, including GNNs or LLMs with low-rank adapters. 
 
 ## Repository Structure
 
 The repository is organized into several main components:
 
-- **clrs_experiments/**: GNN-based experiments on CLRS-30 benchmark
-- **text-graph-tasks/**: LLM-based experiments on text-encoded graph reasoning tasks
-- **gnn_experiments/**: Additional GNN experiments for multitask learning
+- **clrs_experiments**: GNN-based experiments on CLRS-30 benchmark
+- **text-graph-tasks**: LLM-based experiments on text-encoded graph reasoning tasks
+- **gnn_experiments**: Additional GNN experiments for multitask learning
 
 
 ## CLRS experiments
@@ -79,7 +80,7 @@ Available processor types:
 - **branchnn_search.py**: Branch neural network search for task grouping
 - **clustering.py**: Clustering algorithms based on task similarity
 
-Key hyperparameters (see `clrs/examples/run.py` for full list):
+Key hyperparameters (see `clrs/examples/run.py` and `clrs/branchnn_search.py` for full list):
 
 - `--batch_size`: Training batch size (default: 4)
 - `--train_steps`: Number of training iterations (default: 10000)
@@ -96,7 +97,7 @@ This directory contains code for training LLMs on text-encoded graph reasoning t
 
 ### Installation
 
-1. Create a conda environment:
+Create a conda environment:
 ```bash
 conda env create -f text-graph-tasks/environment.yml
 conda activate llama-env
@@ -126,7 +127,6 @@ GraphQA Tasks
 
 ### Training
 
-
 For Text-CLRS datasets, use `train_clrs_text.py`
 
 For GraphWiz datasets, use `train_graphwiz.py`
@@ -150,6 +150,8 @@ Common parameters for training scripts:
 - `--use_lora`: Use LoRA fine-tuning
 - `--use_qlora`: Use QLoRA (4-bit quantization)
 - `--train_adapter`: Use adapter-based training
+- `--load_branching_config`: Load branching structure from file
+- `--task_branching_config_dir`: Directory for branching structure files
 
 ## Requirements
 
