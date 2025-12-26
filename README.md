@@ -1,24 +1,23 @@
 # Multitask Algorithmic Reasoning
 
-This repository contains code for multitask algorithmic reasoning experiments on the CLRS benchmark and text-based graph tasks. We propose branching neural networks for multitask algorithmic reasoning by dividing algorithms into separate branches. This can be
-applied on top of base models, including GNNs or LLMs with low-rank adapters. 
+This repository contains code for multitask algorithmic reasoning experiments on the CLRS benchmark and text-based graph tasks. We propose branching neural networks for multitask algorithmic reasoning by dividing algorithms into separate branches. This can be applied on top of base models, including GNNs or LLMs with low-rank adapters. 
 
 ## Repository Structure
 
 The repository is organized into several main components:
 
-- **clrs_experiments**: GNN-based experiments on CLRS-30 benchmark
-- **text-graph-tasks**: LLM-based experiments on text-encoded graph reasoning tasks
-- **gnn_experiments**: Additional GNN experiments for multitask learning
+- **clrs_experiments**: GNN-based experiments on the CLRS benchmark
+- **text-graph-tasks**: LLM-based experiments on text-based reasoning tasks
+- **gnn_experiments**: Additional GNN experiments
 
 
 ## CLRS experiments
 
 This directory contains code for running GNN-based experiments on the CLRS-30 benchmark, focusing on multitask algorithmic reasoning with different graph neural network architectures.
 
-The CLRS benchmark includes 30 classical algorithms across different categories: `bfs`, `dfs`, `topological_sort`, `articulation_points`, `bridges`, `strongly_connected_components`, `mst_kruskal`, `mst_prim`, `dijkstra`, `bellman_ford`, `dag_shortest_paths`
+We use 12 graph algorithms from the CLRS benchmark across different categories: `bfs`, `dfs`, `topological_sort`, `articulation_points`, `bridges`, `strongly_connected_components`, `mst_kruskal`, `mst_prim`, `dijkstra`, `bellman_ford`, `dag_shortest_paths`
 
-### Usage
+### Installation
 
 1. Create a conda environment:
 ```bash
@@ -33,20 +32,18 @@ pip install -e .
 ```
 
 
-#### Training
+#### Usage
 
-Train a single algorithm (e.g., Dijkstra):
+Use `clrs.examples.run` to train and evaluate models on the CLRS benchmark.
+
 ```bash
+# Train a single algorithm (e.g., Dijkstra):
 python -m clrs.examples.run --algorithms dijkstra
-```
 
-Train multiple algorithms:
-```bash
+# Train multiple algorithms:
 python -m clrs.examples.run --algorithms "bfs" "dfs" "dijkstra"
-```
 
-Specify processor type and model parameters:
-```bash
+# Specify processor type and model parameters
 python -m clrs.examples.run \
   --algorithms "bfs" "dfs" \
   --processor_type "edge_t" \
@@ -56,7 +53,7 @@ python -m clrs.examples.run \
   --projection_dim 16
 ```
 
-Train a branching multitask network
+Use the following example to train a branching network
 ```bash
 CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python -m clrs.examples.run \
     --algorithms "bfs","dfs","topological_sort","articulation_points","bridges","strongly_connected_components","mst_kruskal","mst_prim","dijkstra","bellman_ford",'dag_shortest_paths',"floyd_warshall"\
@@ -64,6 +61,14 @@ CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python -m clrs.examples.run \
     --num_layers 5 \
     --runs 3 \
     --train_steps 10000 
+```
+
+Use `branchnn_search.py` to conduct the search for the branching structures. This file integrates the training,  gradient-based approximation, and clustering steps into a single script. For example: 
+```
+CUDA_VISIBLE_DEVICES=$CUDA_DEVICE python branchnn_search.py \
+        --algorithms "bfs","dfs","topological_sort","articulation_points","bridges","strongly_connected_components","mst_kruskal","mst_prim","dijkstra","bellman_ford",'dag_shortest_paths',"floyd_warshall" \
+        --processor_type "edge_t" --num_layers 5 --hidden_size 192 \
+        --gradient_projection_dim 400 --num_subsets 200 --subset_size 3
 ```
 
 Available processor types:
@@ -75,23 +80,17 @@ Available processor types:
 - `branching_mpnn`: Branching MPNN networks
 - `branching_gat` & `branching_gatv2`: Branching GAT networks
 
-- **clrs/examples/run.py**: Main training script for CLRS algorithms
-- **train_sampled_tasks.py**: Multi-task training with random algorithm subsets
-- **branchnn_search.py**: Branch neural network search for task grouping
-- **clustering.py**: Clustering algorithms based on task similarity
-
 Key hyperparameters (see `clrs/examples/run.py` and `clrs/branchnn_search.py` for full list):
 
 - `--batch_size`: Training batch size (default: 4)
 - `--train_steps`: Number of training iterations (default: 10000)
 - `--learning_rate`: Learning rate (default: 2.5e-4)
 - `--hidden_size`: Hidden dimension size (default: 192)
-- `--num_layers`: Number of network layers (default: 3)
-- `--processor_type`: Type of GNN processor
-- `--hint_mode`: How to use hints (`encoded_decoded`, `decoded_only`, `none`)
+- `--num_layers`: Number of network layers (default: 5)
+- `--processor_type`: Type of GNN processor`
 
 
-## Text-based graph reasoning tasks
+## Text-based reasoning tasks
 
 This directory contains code for training LLMs on text-encoded graph reasoning tasks, including CLRS text tasks, GraphWiz, and GraphQA benchmarks.
 
@@ -133,12 +132,11 @@ For GraphWiz datasets, use `train_graphwiz.py`
 
 For GraphQA datasets, use `train_graphqa.py`
 
-The codebase supports various LLM architectures:
-- **LLaMA family**: `meta-llama/Llama-2-7b-hf`, `meta-llama/Llama-2-13b-hf`, `meta-llama/Meta-Llama-3-8B`, `meta-llama/Meta-Llama-3-1B`
-- **Mistral**: `mistralai/Mistral-7B-v0.1`
-- **Qwen**: `Qwen/Qwen-7B`, `Qwen/Qwen2-7B`
+Use `fast_estimate_compute_gradients.py` to evaluate gradients on a trained adapter model. 
 
-Common parameters for training scripts:
+Use `fast_estimate_linear_regression.py` to perform gradient-based estimation on a trained adapter model over subsets of tasks.
+
+Key parameters for training scripts:
 - `--task_names`: List of tasks to train on
 - `--model_key`: HuggingFace model identifier
 - `--devices`: GPU device IDs to use
